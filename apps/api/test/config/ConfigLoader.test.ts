@@ -148,6 +148,86 @@ describe('ConfigLoader', () => {
   });
 });
 
+describe('ConfigLoader: LLM providers', () => {
+  const ANTHROPIC_KEY = 'sk-ant-test-key-should-never-be-printed';
+
+  it('loads the committed provider defaults', () => {
+    const config = load();
+    expect(config.llm.thinking.provider).toBe('ollama');
+    expect(config.llm.decision.provider).toBe('laya');
+    expect(config.llm.thinking.providers.anthropic.model).toBe('claude-opus-5-5');
+    expect(config.dev.playground).toBe(true);
+  });
+
+  it('selects providers and endpoints from the environment', () => {
+    const config = load({
+      THINKING_PROVIDER: 'anthropic',
+      DECISION_PROVIDER: 'jev',
+      ANTHROPIC_API_KEY: ANTHROPIC_KEY,
+      TYPESAFE_API_KEY: 'ts-key',
+      OLLAMA_BASE_URL: 'http://gpu-box:11434',
+      LAYA_BASE_URL: 'http://laya.internal:8000',
+    });
+    expect(config.llm.thinking.provider).toBe('anthropic');
+    expect(config.llm.decision.provider).toBe('jev');
+    expect(config.secrets.anthropicApiKey).toBe(ANTHROPIC_KEY);
+    expect(config.llm.thinking.providers.ollama.baseUrl).toBe('http://gpu-box:11434');
+    expect(config.llm.decision.providers.laya.baseUrl).toBe('http://laya.internal:8000');
+  });
+
+  it('names an unknown provider and lists the supported ones', () => {
+    const error = loadError({ COOKIE_SECRET, CSRF_SECRET, THINKING_PROVIDER: 'gemini' });
+    const issue = error.issues.find((i) => i.startsWith('llm.thinking.provider'));
+    expect(issue).toContain('(from THINKING_PROVIDER)');
+    expect(issue).toMatch(/ollama.*anthropic.*fake/);
+  });
+
+  it('attributes a deep override to its env var', () => {
+    expect(loadError({ COOKIE_SECRET, CSRF_SECRET, OLLAMA_BASE_URL: 'not a url' }).message).toContain(
+      'llm.thinking.providers.ollama.baseUrl (from OLLAMA_BASE_URL)',
+    );
+  });
+
+  it('requires ANTHROPIC_API_KEY only when anthropic is active', () => {
+    expect(loadError({ COOKIE_SECRET, CSRF_SECRET, THINKING_PROVIDER: 'anthropic' }).message).toContain(
+      'ANTHROPIC_API_KEY is required',
+    );
+    expect(load({ THINKING_PROVIDER: 'ollama' }).secrets.anthropicApiKey).toBeUndefined();
+  });
+
+  it('requires TYPESAFE_API_KEY for jev but no key for laya', () => {
+    expect(loadError({ COOKIE_SECRET, CSRF_SECRET, DECISION_PROVIDER: 'jev' }).message).toContain(
+      'TYPESAFE_API_KEY is required',
+    );
+    expect(load({ DECISION_PROVIDER: 'laya' }).secrets.layaApiKey).toBeUndefined();
+  });
+
+  it('rejects fake providers in production', () => {
+    const error = loadError({
+      COOKIE_SECRET,
+      CSRF_SECRET,
+      NODE_ENV: 'production',
+      THINKING_PROVIDER: 'fake',
+      DECISION_PROVIDER: 'fake',
+    });
+    expect(error.message).toContain('llm.thinking.provider (from THINKING_PROVIDER) must not be "fake"');
+    expect(error.message).toContain('llm.decision.provider (from DECISION_PROVIDER) must not be "fake"');
+    expect(load({ THINKING_PROVIDER: 'fake', DECISION_PROVIDER: 'fake' }).llm.thinking.provider).toBe('fake');
+  });
+
+  it('never prints provider key values', () => {
+    const error = loadError({
+      COOKIE_SECRET,
+      CSRF_SECRET,
+      ANTHROPIC_API_KEY: ANTHROPIC_KEY,
+      THINKING_PROVIDER: 'anthropic',
+      DECISION_PROVIDER: 'jev',
+      PORT: 'abc',
+    });
+    expect(error.message).not.toContain(ANTHROPIC_KEY);
+  });
+});
+
 describe('WorkspaceRoot', () => {
   it('finds the repo root from apps/api', () => {
     expect(WorkspaceRoot.find(path.join(repoRoot, 'apps/api'))).toBe(repoRoot);

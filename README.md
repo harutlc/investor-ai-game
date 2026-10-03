@@ -2,7 +2,7 @@
 
 The player pitches a startup to an AI investor and negotiates the deal. The game design and roadmap are in [`TASKS.md`](./TASKS.md); the homework brief is in [`homework-en.md`](./homework-en.md).
 
-This README covers the **project base**: the monorepo, the Express API foundation and its security baseline. Game features are added on top of it in later changes.
+This README covers what exists so far: the monorepo, the Express API foundation and its security baseline, and the LLM provider layer. Game features are added on top of it in later changes.
 
 ## Prerequisites
 
@@ -48,6 +48,7 @@ apps/api/            Express API
   src/services/      business logic
   src/http/          ApiServer, controllers/, middleware/
   src/errors/        AppError and one subclass per error
+  src/llm/           LLM providers: thinking/ (Ollama, Anthropic, fake), decision/ (Jev, Laya, fake)
   test/              Vitest + Supertest (in-memory SQLite)
 packages/shared/     zod schemas and types shared with the future web app
 config/app.config.json   non-secret settings (committed)
@@ -79,8 +80,92 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 | `DATABASE_FILE`                | `database.file` (relative to the repo root, or `:memory:`)       |
 | `LOG_LEVEL`                    | `logging.level`                                                  |
 | `APP_CONFIG_PATH`              | Path to an alternative config file                               |
+| `THINKING_PROVIDER`            | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)        |
+| `DECISION_PROVIDER`            | `llm.decision.provider` (`laya`, `jev` or `fake`)                |
+| `OLLAMA_BASE_URL`              | `llm.thinking.providers.ollama.baseUrl`                          |
+| `LAYA_BASE_URL`                | `llm.decision.providers.laya.baseUrl`                            |
+| `ANTHROPIC_API_KEY`            | Required when the thinking provider is `anthropic`               |
+| `TYPESAFE_API_KEY`             | Required when the decision provider is `jev`                     |
+| `LAYA_API_KEY`                 | Optional; sent as a bearer token if your laya-serve requires one |
 
 Invalid configuration stops startup with a list of every problem. Secret values are never printed.
+
+## LLM providers
+
+The investor uses two kinds of model:
+
+- **The decision LLM is the brain.** Jev or Laya returns typed judgments: `choice` (one option), `noul` (probability of yes) and `score` (a position on ordered levels). Code then decides what the investor does.
+- **The thinking LLM is the voice.** Ollama or Anthropic writes the investor's replies and the player's options, as text or as JSON that matches a schema.
+
+Exactly one provider of each kind is active, chosen by config or env. Switching providers needs no code changes:
+
+```bash
+THINKING_PROVIDER=anthropic DECISION_PROVIDER=jev pnpm dev
+```
+
+Startup fails only on bad configuration, for example an unknown provider or a missing key for the _active_ provider. An unreachable provider never stops the server.
+
+### Ollama (thinking, local)
+
+```bash
+ollama pull llama3.1:8b   # the model set in llm.thinking.providers.ollama.model
+ollama serve              # http://localhost:11434 (override with OLLAMA_BASE_URL)
+```
+
+Sampling options (`temperature`, `maxTokens`) live in the Ollama config block. JSON requests send the schema in Ollama's `format` field.
+
+### Anthropic (thinking, hosted)
+
+Set `THINKING_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. The defaults are `claude-opus-5-5` with `effort: "low"`, since investor replies are short chat turns. Current Claude models reject `temperature`, so depth and cost are controlled with `effort`. `fallbacks: true` turns on Anthropic's server-side refusal fallback (`fallbacks: "default"`); if the whole chain still declines, the call fails with `PROVIDER_BAD_RESPONSE`.
+
+### Laya (decision, self-hosted)
+
+```bash
+pip install "laya[serve]"
+laya-serve                # http://localhost:8000 (override with LAYA_BASE_URL)
+```
+
+Laya speaks the same wire protocol as Jev, so both use the official `@typesafe-ai/sdk` client. `model` picks the checkpoint: `english` (the default), `multilingual` or `typed-decisions`. Without `LAYA_API_KEY` the server is unauthenticated. The client still sends a placeholder token, which laya-serve ignores.
+
+### Jev (decision, hosted)
+
+Set `DECISION_PROVIDER=jev` and `TYPESAFE_API_KEY`.
+
+> **Confidence values are not comparable between Jev and Laya.** They compute confidence differently, so calibrate any threshold separately for each provider.
+
+### Errors
+
+Provider failures use the standard error format:
+
+| Code                    | HTTP | Meaning                                                                                    |
+| ----------------------- | ---- | ------------------------------------------------------------------------------------------ |
+| `PROVIDER_UNAVAILABLE`  | 503  | Unreachable, timed out, rate-limited, overloaded, or credentials rejected (see server log) |
+| `PROVIDER_BAD_RESPONSE` | 502  | Invalid JSON after one retry, a refusal, or an inconsistent answer                         |
+
+### Health
+
+`GET /api/health` reports `checks.thinking` and `checks.decision` as `ok` or `error`. These checks never change the HTTP status, which only the database decides, and the response never names a provider. Results are cached for `llm.healthCacheMs` (30 s by default).
+
+### Dev playground
+
+When `dev.playground` is `true` (the committed default) and `NODE_ENV` is not `production`, three endpoints let you try the active providers by hand. They still need a session cookie and a CSRF token:
+
+```bash
+API=http://localhost:3001
+TOKEN=$(curl -s -c jar -b jar $API/api/csrf-token | node -pe 'JSON.parse(require("fs").readFileSync(0)).csrfToken')
+post() { curl -s -c jar -b jar -H 'Content-Type: application/json' -H "X-CSRF-Token: $TOKEN" -d "$2" "$API$1"; echo; }
+
+post /api/dev/thinking/text '{"system":"You are a greedy investor.","messages":[{"role":"user","content":"500k for 15%?"}]}'
+
+post /api/dev/thinking/json '{"messages":[{"role":"user","content":"Give me 3 reply options"}],
+  "schema":{"type":"object","properties":{"options":{"type":"array","items":{"type":"string"}}},"required":["options"]}}'
+
+post /api/dev/decision '{"state":{"player_offer":{"investment":500000,"equity":15}},
+  "questions":{"reaction":{"type":"choice","instructions":"How should the investor react?",
+  "criteria":{"accept":null,"counter":null,"reject":null,"walk_away":null}}}}'
+```
+
+Without Ollama or laya-serve running, start the API with `THINKING_PROVIDER=fake DECISION_PROVIDER=fake pnpm dev`. Fake providers are refused in production.
 
 ## Security
 

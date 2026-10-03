@@ -21,5 +21,51 @@
   },
   "logging": {
     "level": "info"
+  },
+  "llm": {
+    "thinking": {
+      "provider": "ollama",
+      "providers": {
+        "ollama": {
+          "baseUrl": "http://localhost:11434",
+          "model": "qwen2.5:3b",
+          "temperature": 0.8,
+          "maxTokens": 1024,
+          "timeoutMs": 60000,
+          "maxRetries": 1
+        },
+        "anthropic": {
+          "model": "claude-opus-5-5",
+          "maxTokens": 2048,
+          "effort": "low",
+          "fallbacks": true,
+          "timeoutMs": 60000,
+          "maxRetries": 2
+        },
+        "fake": {}
+      }
+    },
+    "decision": {
+      "provider": "laya",
+      "providers": {
+        "laya": {
+          "baseUrl": "http://localhost:8000",
+          "model": "english",
+          "timeoutMs": 10000,
+          "maxRetries": 2
+        },
+        "jev": {
+          "baseUrl": "https://api.typesafe.ai",
+          "model": "jev-latest",
+          "timeoutMs": 10000,
+          "maxRetries": 2
+        },
+        "fake": {}
+      }
+    },
+    "healthCacheMs": 30000
+  },
+  "dev": {
+    "playground": true
   }
 }

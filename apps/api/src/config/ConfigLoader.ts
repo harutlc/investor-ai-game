@@ -22,15 +22,35 @@ const ENV_NAMES: Record<string, string> = {
   nodeEnv: 'NODE_ENV',
   'secrets.cookieSecret': 'COOKIE_SECRET',
   'secrets.csrfSecret': 'CSRF_SECRET',
+  'secrets.anthropicApiKey': 'ANTHROPIC_API_KEY',
+  'secrets.typesafeApiKey': 'TYPESAFE_API_KEY',
+  'secrets.layaApiKey': 'LAYA_API_KEY',
 };
 
-/** Config paths an environment variable may override. */
-const ENV_OVERRIDES: Record<string, string> = {
-  'server.port': 'PORT',
-  'cors.origins': 'CORS_ORIGINS',
-  'database.file': 'DATABASE_FILE',
-  'logging.level': 'LOG_LEVEL',
-};
+interface EnvOverride {
+  /** Dotted config path, any depth. */
+  path: string;
+  env: string;
+  parse?: (raw: string) => unknown;
+}
+
+const commaList = (raw: string) =>
+  raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+/** Config values an environment variable may override (the env value wins). */
+const ENV_OVERRIDES: readonly EnvOverride[] = [
+  { path: 'server.port', env: 'PORT' },
+  { path: 'cors.origins', env: 'CORS_ORIGINS', parse: commaList },
+  { path: 'database.file', env: 'DATABASE_FILE' },
+  { path: 'logging.level', env: 'LOG_LEVEL' },
+  { path: 'llm.thinking.provider', env: 'THINKING_PROVIDER' },
+  { path: 'llm.decision.provider', env: 'DECISION_PROVIDER' },
+  { path: 'llm.thinking.providers.ollama.baseUrl', env: 'OLLAMA_BASE_URL' },
+  { path: 'llm.decision.providers.laya.baseUrl', env: 'LAYA_BASE_URL' },
+];
 
 const DEFAULT_CONFIG_PATH = 'config/app.config.json';
 const IN_MEMORY_DB = ':memory:';
@@ -50,31 +70,25 @@ export class ConfigLoader {
   load(): AppConfig {
     const env = this.readEnv();
     const file = this.readConfigFile(env);
-    const overridden = new Set<string>();
+    const overridden = new Map<string, string>();
 
-    const set = (configPath: string, value: unknown) => {
-      overridden.add(configPath);
-      const [section, key] = configPath.split('.') as [string, string];
-      const target = (file[section] ??= {}) as Record<string, unknown>;
-      target[key] = value;
-    };
-
-    if (env.PORT !== undefined) set('server.port', env.PORT);
-    if (env.CORS_ORIGINS !== undefined) {
-      set(
-        'cors.origins',
-        env.CORS_ORIGINS.split(',')
-          .map((origin) => origin.trim())
-          .filter(Boolean),
-      );
+    for (const { path: configPath, env: name, parse } of ENV_OVERRIDES) {
+      const raw = env[name];
+      if (raw === undefined) continue;
+      ConfigLoader.setPath(file, configPath, parse ? parse(raw) : raw);
+      overridden.set(configPath, name);
     }
-    if (env.DATABASE_FILE !== undefined) set('database.file', env.DATABASE_FILE);
-    if (env.LOG_LEVEL !== undefined) set('logging.level', env.LOG_LEVEL);
 
     const result = AppConfigSchema.safeParse({
       ...file,
       nodeEnv: env.NODE_ENV ?? 'development',
-      secrets: { cookieSecret: env.COOKIE_SECRET, csrfSecret: env.CSRF_SECRET },
+      secrets: {
+        cookieSecret: env.COOKIE_SECRET,
+        csrfSecret: env.CSRF_SECRET,
+        anthropicApiKey: env.ANTHROPIC_API_KEY,
+        typesafeApiKey: env.TYPESAFE_API_KEY,
+        layaApiKey: env.LAYA_API_KEY,
+      },
     });
     if (!result.success) throw new ConfigError(this.describeIssues(result.error, overridden));
 
@@ -124,13 +138,32 @@ export class ConfigLoader {
     return parsed as Record<string, unknown>;
   }
 
-  private describeIssues(error: z.ZodError, overridden: ReadonlySet<string>): string[] {
+  /** Sets `target.a.b.c = value`, creating intermediate objects (replacing non-objects) on the way. */
+  private static setPath(target: Record<string, unknown>, dottedPath: string, value: unknown): void {
+    const keys = dottedPath.split('.');
+    const last = keys.pop()!;
+    let node = target;
+    for (const key of keys) {
+      const child = node[key];
+      if (child === null || typeof child !== 'object' || Array.isArray(child)) node[key] = {};
+      node = node[key] as Record<string, unknown>;
+    }
+    node[last] = value;
+  }
+
+  private describeIssues(error: z.ZodError, overridden: ReadonlyMap<string, string>): string[] {
     return error.issues.map((issue) => {
-      const dotted = issue.path.map(String).join('.');
-      const base = issue.path.slice(0, 2).map(String).join('.');
+      const segments = issue.path.map(String);
+      const dotted = segments.join('.');
       let name = ENV_NAMES[dotted] ?? (dotted || '(root)');
-      const envName = ENV_OVERRIDES[base];
-      if (envName && overridden.has(base)) name += ` (from ${envName})`;
+      // Attribute the issue to the env var that overrode the longest matching prefix of its path.
+      for (let length = segments.length; length > 0; length--) {
+        const envName = overridden.get(segments.slice(0, length).join('.'));
+        if (envName) {
+          name += ` (from ${envName})`;
+          break;
+        }
+      }
       return `${name} ${issue.message}`;
     });
   }

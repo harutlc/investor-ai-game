@@ -53,8 +53,12 @@ describe('DTO schemas', () => {
   });
 
   it('validates health', () => {
-    expect(HealthDtoSchema.safeParse({ status: 'ok', uptime: 1.5, checks: { database: 'ok' } }).success).toBe(
-      true,
-    );
+    expect(
+      HealthDtoSchema.safeParse({
+        status: 'ok',
+        uptime: 1.5,
+        checks: { database: 'ok', thinking: 'ok', decision: 'ok' },
+      }).success,
+    ).toBe(true);
   });
 });

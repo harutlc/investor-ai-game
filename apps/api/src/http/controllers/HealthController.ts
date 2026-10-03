@@ -12,8 +12,8 @@ export class HealthController implements Controller {
     return Router().get('/', this.get);
   }
 
-  private readonly get = (_req: Request, res: Response): void => {
-    const result = this.health.check();
+  private readonly get = async (_req: Request, res: Response): Promise<void> => {
+    const result = await this.health.check();
     res
       .status(result.status === 'ok' ? 200 : 503)
       .set('Cache-Control', 'no-store')

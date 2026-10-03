@@ -7,6 +7,8 @@ import { PayloadTooLargeError } from '../../src/errors/PayloadTooLargeError.js';
 import { RateLimitError } from '../../src/errors/RateLimitError.js';
 import { UnsupportedMediaTypeError } from '../../src/errors/UnsupportedMediaTypeError.js';
 import { ValidationError } from '../../src/errors/ValidationError.js';
+import { ProviderBadResponseError } from '../../src/llm/errors/ProviderBadResponseError.js';
+import { ProviderUnavailableError } from '../../src/llm/errors/ProviderUnavailableError.js';
 
 describe('AppError subclasses', () => {
   it.each([
@@ -17,6 +19,8 @@ describe('AppError subclasses', () => {
     [new UnsupportedMediaTypeError(), 415, 'UNSUPPORTED_MEDIA_TYPE'],
     [new PayloadTooLargeError(), 413, 'PAYLOAD_TOO_LARGE'],
     [new RateLimitError(), 429, 'RATE_LIMITED'],
+    [new ProviderUnavailableError(), 503, 'PROVIDER_UNAVAILABLE'],
+    [new ProviderBadResponseError(), 502, 'PROVIDER_BAD_RESPONSE'],
   ] as const)('%o maps to %i %s', (error, status, code) => {
     expect(error).toBeInstanceOf(AppError);
     expect(error.status).toBe(status);

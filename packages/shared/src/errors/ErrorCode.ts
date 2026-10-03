@@ -9,6 +9,8 @@ export const ErrorCodeSchema = z.enum([
   'UNSUPPORTED_MEDIA_TYPE',
   'PAYLOAD_TOO_LARGE',
   'RATE_LIMITED',
+  'PROVIDER_UNAVAILABLE',
+  'PROVIDER_BAD_RESPONSE',
   'INTERNAL_ERROR',
 ]);
 
