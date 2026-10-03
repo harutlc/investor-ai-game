@@ -53,8 +53,9 @@ apps/api/            Express API
                      ConfidenceGate, DecisionLogger)
   src/game/          API-only game types (the investor's hidden state)
   src/personas/      investor personas: definitions, validation, catalog
+  src/brain/         the investor's brain: decision state, offer candidates, question sets, InvestorBrain
   test/              Vitest + Supertest (in-memory SQLite)
-packages/shared/     zod schemas and types shared with the future web app (game contracts, ValuationCalculator)
+packages/shared/     zod schemas and types shared with the future web app (game contracts, ValuationCalculator, MoneyFormatter)
 config/app.config.json   non-secret settings (committed)
 .env                 secrets and overrides (git-ignored)
 ```
@@ -201,6 +202,28 @@ curl -s localhost:3001/api/personas
 ```
 
 Decision calls made for a game go through `DecisionLogger`, which records the questions, answers (or error code) and latency in the `decision_logs` table for the brain-insights panel.
+
+## Investor brain
+
+The decision model is the investor's **brain**: it answers narrow, typed questions and code acts on the answers. `InvestorBrain` (in `apps/api/src/brain/`) runs two stages per turn:
+
+1. **Stage A, `understand()`**, only for free text: what the player is trying to do, and which offer the message contains.
+2. **Stage B, `evaluate()`**: the investor's verdict on the move.
+
+Both stages get the same kind of state, built by `NegotiationStateBuilder` in the tutor's shape (`player_offer`, `investor`, `history`, …). The state holds the investor's hidden numbers, so it goes to the decision provider only: it is never logged or returned.
+
+| Stage | Set       | Questions                                                                                                                                                                     |
+| ----- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A     | `intent`  | `intent` (choice: `counter_offer`, `accept`, `decline`, `ask_question`, `answer_question`, `leverage_claim`, `small_talk`, `other`), `injection` (noul)                       |
+| A     | `offer`   | `investment`, `equity` (choices among the numbers code found in the message, plus `none`)                                                                                     |
+| B     | `deal`    | `accept` (5-level score), `reaction` (choice: `accept`, `counter`, `reject`, `walk_away`), `good_deal` (noul), `concession_size` (choice: `none`, `small`, `medium`, `large`) |
+| B     | `conduct` | `politeness` (score), `insult` (noul), `confidence` (score); only when the move has text                                                                                      |
+
+Numbers are **selected, never generated**: `OfferCandidateExtractor` finds amounts (`500k`, `€0.5M`, `500,000`) and percentages (`15%`, `12 percent`) with a regex, and the model only picks one of them (or `none`).
+
+Each set is one decision request. The requests of a stage run concurrently, each one is logged in `decision_logs` with its stage (`A` or `B`), and every answer comes back with its confidence and an `uncertain` flag from `llm.decision.minConfidence`. The brain never acts on the answers; the negotiation policy does.
+
+**Adding a question set:** write a class implementing `StageAQuestionSet` or `StageBQuestionSet` (an `id`, a `stage`, optionally a `feature` from `game.features`, and `prepare()`, which returns the questions and how to interpret their answers), then register it in `Container`, after `mvpQuestionSets()`. A set with a `feature` is only asked while that flag is on.
 
 ## Testing the API with Postman
 

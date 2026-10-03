@@ -7,5 +7,6 @@ export * from './decision/DecisionSchemas.js';
 export * from './playground/PlaygroundSchemas.js';
 export * from './game/Money.js';
 export * from './game/ValuationCalculator.js';
+export * from './game/MoneyFormatter.js';
 export * from './game/GameSchemas.js';
 export * from './game/GameDtos.js';

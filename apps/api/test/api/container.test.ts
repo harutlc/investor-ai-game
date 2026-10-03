@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { InvestorBrain } from '../../src/brain/InvestorBrain.js';
 import { ConfidenceGate } from '../../src/llm/decision/ConfidenceGate.js';
 import { DecisionLogger } from '../../src/llm/decision/DecisionLogger.js';
 import { FakeDecisionProvider } from '../../src/llm/decision/FakeDecisionProvider.js';
 import { SystemOneDecisionProvider } from '../../src/llm/decision/SystemOneDecisionProvider.js';
 import { FakeThinkingProvider } from '../../src/llm/thinking/FakeThinkingProvider.js';
 import { OllamaThinkingProvider } from '../../src/llm/thinking/OllamaThinkingProvider.js';
+import { brainMove, brainPersona } from '../support/brainFixtures.js';
 import { createTestApp } from '../support/createTestApp.js';
+import { seedSession, sessionFixture } from '../support/gameFixtures.js';
 
 describe('Container LLM wiring', () => {
   it('uses fake providers by default in tests', () => {
@@ -54,5 +57,39 @@ describe('Container game wiring', () => {
       },
     });
     expect(container.confidenceGate.minConfidence).toBe(0.7);
+  });
+
+  it('builds the investor brain with the MVP question sets, two per stage', () => {
+    const { container } = createTestApp();
+    expect(container.investorBrain).toBeInstanceOf(InvestorBrain);
+    expect(container.questionSetRegistry.forStage('A').map((set) => set.id)).toEqual(['intent', 'offer']);
+    expect(container.questionSetRegistry.forStage('B').map((set) => set.id)).toEqual(['deal', 'conduct']);
+  });
+
+  it('gives the state builder the configured turn limit', () => {
+    const { container } = createTestApp({
+      mutate: (config) => {
+        config.game.maxTurns = 8;
+      },
+    });
+    const session = sessionFixture('player-1', { turn: 3 });
+    const state = container.negotiationStateBuilder.build({
+      session,
+      persona: brainPersona,
+      earlierOffers: [],
+    });
+    expect(state.turns_left).toBe(5);
+  });
+
+  it('logs brain decisions through the container database', async () => {
+    const { container } = createTestApp();
+    const sessionId = seedSession(container.database).id;
+
+    await container.investorBrain.evaluate({ sessionId, turn: 1, ...brainMove('Deal?') });
+
+    expect(container.decisionLogRepository.listForSession(sessionId).map((entry) => entry.stage)).toEqual([
+      'B',
+      'B',
+    ]);
   });
 });

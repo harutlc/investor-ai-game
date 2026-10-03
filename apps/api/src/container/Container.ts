@@ -1,4 +1,8 @@
 import type { Logger } from 'pino';
+import { InvestorBrain } from '../brain/InvestorBrain.js';
+import { mvpQuestionSets } from '../brain/mvpQuestionSets.js';
+import { NegotiationStateBuilder } from '../brain/NegotiationStateBuilder.js';
+import { QuestionSetRegistry } from '../brain/QuestionSetRegistry.js';
 import type { AppConfig } from '../config/AppConfig.js';
 import { Database } from '../db/Database.js';
 import { ApiServer } from '../http/ApiServer.js';
@@ -41,8 +45,7 @@ export interface ContainerOverrides {
 
 /**
  * Manual DI: config → logger → database → repositories → LLM providers (+ confidence gate, decision logger)
- * → services → middleware/controllers
- * → server.
+ * → investor brain → services → middleware/controllers → server.
  */
 export class Container {
   readonly logger: Logger;
@@ -59,6 +62,10 @@ export class Container {
   /** Decision calls made on behalf of a game session go through this, so they are logged. */
   readonly decisionLogger: DecisionLogger;
   readonly personaCatalog: PersonaCatalog;
+  /** The question sets enabled by `game.features`. */
+  readonly questionSetRegistry: QuestionSetRegistry;
+  readonly negotiationStateBuilder: NegotiationStateBuilder;
+  readonly investorBrain: InvestorBrain;
   readonly playerService: PlayerService;
   readonly healthService: HealthService;
   readonly server: ApiServer;
@@ -95,6 +102,14 @@ export class Container {
 
     // Validates every persona definition; an invalid one stops startup.
     this.personaCatalog = new PersonaCatalog();
+
+    this.questionSetRegistry = new QuestionSetRegistry(mvpQuestionSets(), config.game.features);
+    this.negotiationStateBuilder = new NegotiationStateBuilder(config.game.maxTurns);
+    this.investorBrain = new InvestorBrain(
+      this.questionSetRegistry,
+      this.decisionLogger,
+      this.confidenceGate,
+    );
 
     this.playerService = new PlayerService(this.playerRepository, overrides.clock);
     this.healthService = new HealthService(this.database, this.providerHealth);
