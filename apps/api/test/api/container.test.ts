@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { InvestorBrain } from '../../src/brain/InvestorBrain.js';
+import { NegotiationPolicy } from '../../src/game/NegotiationPolicy.js';
 import { ConfidenceGate } from '../../src/llm/decision/ConfidenceGate.js';
 import { DecisionLogger } from '../../src/llm/decision/DecisionLogger.js';
 import { FakeDecisionProvider } from '../../src/llm/decision/FakeDecisionProvider.js';
@@ -91,5 +92,29 @@ describe('Container game wiring', () => {
       'B',
       'B',
     ]);
+  });
+
+  it('builds the negotiation policy, meter hints and turn limiter from config.game', () => {
+    const { container } = createTestApp({
+      mutate: (config) => {
+        config.game.maxTurns = 8;
+      },
+    });
+    expect(container.negotiationPolicy).toBeInstanceOf(NegotiationPolicy);
+    expect(container.turnLimiter.maxTurns).toBe(8);
+    expect(container.turnLimiter.turnsLeft(3)).toBe(5);
+    expect(container.meterHintMapper.toMeters({ interest: 0.5, patience: 2 })).toEqual({
+      interestLevel: 'medium',
+      patienceHint: 'Tapping the table',
+    });
+    const state = {
+      budget: 700_000,
+      minEquity: 20,
+      maxEquity: 30,
+      concessionStep: 4,
+      interest: 0.5,
+      patience: 4,
+    };
+    expect(container.investorStateUpdater.afterInjection(state).patience).toBe(3);
   });
 });

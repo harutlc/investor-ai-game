@@ -51,7 +51,7 @@ apps/api/            Express API
   src/errors/        AppError and one subclass per error
   src/llm/           LLM providers: thinking/ (Ollama, Anthropic, fake), decision/ (Jev, Laya, fake,
                      ConfidenceGate, DecisionLogger)
-  src/game/          API-only game types (the investor's hidden state)
+  src/game/          the game master: hidden investor state, NegotiationPolicy, meters, turn limit
   src/personas/      investor personas: definitions, validation, catalog
   src/brain/         the investor's brain: decision state, offer candidates, question sets, InvestorBrain
   test/              Vitest + Supertest (in-memory SQLite)
@@ -99,13 +99,21 @@ Invalid configuration stops startup with a list of every problem. Secret values 
 
 Game settings live in the `game` section and have no environment overrides:
 
-| Key                          | Meaning                                                                  |
-| ---------------------------- | ------------------------------------------------------------------------ |
-| `game.currency`              | `EUR` (the only supported value)                                         |
-| `game.maxTurns`              | Turn limit per game (1–50, default 15)                                   |
-| `game.defaultValuation`      | Pre-money valuation suggested for a new pitch (default €2,000,000)       |
-| `game.features.*`            | v2 feature flags (`phases`, `dueDiligence`, …); all off until they exist |
-| `llm.decision.minConfidence` | Decision answers below this confidence count as uncertain (default 0.55) |
+| Key                                 | Meaning                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------ |
+| `game.currency`                     | `EUR` (the only supported value)                                               |
+| `game.maxTurns`                     | Turn limit per game (1–50, default 15)                                         |
+| `game.defaultValuation`             | Pre-money valuation suggested for a new pitch (default €2,000,000)             |
+| `game.features.*`                   | v2 feature flags (`phases`, `dueDiligence`, …); all off until they exist       |
+| `game.policy.acceptMinLevel`        | Minimum `accept` score (0–4) for the investor to accept (default 3)            |
+| `game.policy.goodDealMin`           | Minimum `good_deal` probability to accept (default 0.5)                        |
+| `game.policy.walkAwayMinConfidence` | Confidence a `walk_away` reaction needs to end the game (default 0.7)          |
+| `game.policy.injectionThreshold`    | Injection probability at which a move is brushed off (default 0.6)             |
+| `game.policy.insultThreshold`       | Insult probability at which rudeness costs patience (default 0.6)              |
+| `game.policy.concessionSteps`       | Steps per `concession_size` (`none`/`small`/`medium`/`large`, default 0/1/2/3) |
+| `game.policy.patienceCost`          | Patience lost per `reject` / `insult` / `injection` (default 1/2/1)            |
+| `game.policy.interestWeight`        | How strongly `good_deal` moves interest each turn (default 0.2)                |
+| `llm.decision.minConfidence`        | Decision answers below this confidence count as uncertain (default 0.55)       |
 
 ## LLM providers
 
@@ -224,6 +232,23 @@ Numbers are **selected, never generated**: `OfferCandidateExtractor` finds amoun
 Each set is one decision request. The requests of a stage run concurrently, each one is logged in `decision_logs` with its stage (`A` or `B`), and every answer comes back with its confidence and an `uncertain` flag from `llm.decision.minConfidence`. The brain never acts on the answers; the negotiation policy does.
 
 **Adding a question set:** write a class implementing `StageAQuestionSet` or `StageBQuestionSet` (an `id`, a `stage`, optionally a `feature` from `game.features`, and `prepare()`, which returns the questions and how to interpret their answers), then register it in `Container`, after `mvpQuestionSets()`. A set with a `feature` is only asked while that flag is on.
+
+## Negotiation policy
+
+Code is the game master. `NegotiationPolicy` (in `apps/api/src/game/`) turns the brain's judgments and the investor's hidden numbers into one action per move; every threshold comes from `game.policy`.
+
+| Action      | When                                                                                                                            | Offer                     |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `clarify`   | the brain is unsure of `reaction`                                                                                               | unchanged                 |
+| `reject`    | `reaction = reject`, a hesitant `walk_away`, or a move with no offer                                                            | unchanged; costs patience |
+| `accept`    | `reaction = accept`, `accept` ≥ `acceptMinLevel`, `good_deal` ≥ `goodDealMin`, and the offer fits the budget and minimum equity | the player's              |
+| `counter`   | `reaction = counter`, or an accept that fails those checks                                                                      | computed (below)          |
+| `walk_away` | a confident `walk_away`, or patience reaches 0                                                                                  | none                      |
+| `dismiss`   | Stage A injection ≥ `injectionThreshold` (Stage B is skipped)                                                                   | unchanged; costs patience |
+
+**Counter-offers:** equity moves from the investor's offer toward the player's by `concessionSteps[concession_size] × concessionStep` (the persona's), never past the player's number, and stays within the persona's equity limits; the investment is the player's ask, capped at the budget. Example: 30% vs the player's 15%, `medium`, step 4 → 22%.
+
+After each move `InvestorStateUpdater` moves interest by `(good_deal − 0.5) × interestWeight` and takes patience for rejections and insults. `MeterHintMapper` shows the player only hints (`low`/`medium`/`high` interest, "Tapping the table"). `TurnLimiter` ends the game: `deal` (either side accepts), `rejected_by_player`, `walked_away`, or `out_of_turns` at `game.maxTurns`.
 
 ## Testing the API with Postman
 

@@ -284,6 +284,46 @@ describe('ConfigLoader: game settings', () => {
     ).toBe(true);
   });
 
+  it('loads the committed negotiation policy', () => {
+    expect(load().game.policy).toEqual({
+      acceptMinLevel: 3,
+      goodDealMin: 0.5,
+      walkAwayMinConfidence: 0.7,
+      injectionThreshold: 0.6,
+      insultThreshold: 0.6,
+      concessionSteps: { none: 0, small: 1, medium: 2, large: 3 },
+      patienceCost: { reject: 1, insult: 2, injection: 1 },
+      interestWeight: 0.2,
+    });
+  });
+
+  it('names decreasing concession steps', () => {
+    writeConfig((config) => {
+      (config.game!.policy as Record<string, unknown>).concessionSteps = {
+        none: 0,
+        small: 2,
+        medium: 1,
+        large: 3,
+      };
+    });
+    expect(
+      loadError({ COOKIE_SECRET, CSRF_SECRET }).issues.some((i) =>
+        i.startsWith('game.policy.concessionSteps'),
+      ),
+    ).toBe(true);
+  });
+
+  it('names an invalid policy threshold', () => {
+    writeConfig((config) => {
+      (config.game!.policy as Record<string, unknown>).injectionThreshold = 1.5;
+    });
+    expect(
+      loadError({ COOKIE_SECRET, CSRF_SECRET }).issues.some((i) =>
+        i.startsWith('game.policy.injectionThreshold'),
+      ),
+    ).toBe(true);
+  });
+
   it('rejects an unsupported currency', () => {
     writeConfig((config) => {
       config.game!.currency = 'USD';

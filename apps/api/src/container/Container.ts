@@ -5,6 +5,10 @@ import { NegotiationStateBuilder } from '../brain/NegotiationStateBuilder.js';
 import { QuestionSetRegistry } from '../brain/QuestionSetRegistry.js';
 import type { AppConfig } from '../config/AppConfig.js';
 import { Database } from '../db/Database.js';
+import { InvestorStateUpdater } from '../game/InvestorStateUpdater.js';
+import { MeterHintMapper } from '../game/MeterHintMapper.js';
+import { NegotiationPolicy } from '../game/NegotiationPolicy.js';
+import { TurnLimiter } from '../game/TurnLimiter.js';
 import { ApiServer } from '../http/ApiServer.js';
 import type { Controller } from '../http/controllers/Controller.js';
 import { CsrfController } from '../http/controllers/CsrfController.js';
@@ -45,7 +49,7 @@ export interface ContainerOverrides {
 
 /**
  * Manual DI: config → logger → database → repositories → LLM providers (+ confidence gate, decision logger)
- * → investor brain → services → middleware/controllers → server.
+ * → investor brain → negotiation policy → services → middleware/controllers → server.
  */
 export class Container {
   readonly logger: Logger;
@@ -66,6 +70,11 @@ export class Container {
   readonly questionSetRegistry: QuestionSetRegistry;
   readonly negotiationStateBuilder: NegotiationStateBuilder;
   readonly investorBrain: InvestorBrain;
+  readonly investorStateUpdater: InvestorStateUpdater;
+  /** The game master: judgments + hidden numbers → the investor's action. */
+  readonly negotiationPolicy: NegotiationPolicy;
+  readonly meterHintMapper: MeterHintMapper;
+  readonly turnLimiter: TurnLimiter;
   readonly playerService: PlayerService;
   readonly healthService: HealthService;
   readonly server: ApiServer;
@@ -110,6 +119,11 @@ export class Container {
       this.decisionLogger,
       this.confidenceGate,
     );
+
+    this.investorStateUpdater = new InvestorStateUpdater(config.game.policy);
+    this.negotiationPolicy = new NegotiationPolicy(config.game.policy, this.investorStateUpdater);
+    this.meterHintMapper = new MeterHintMapper();
+    this.turnLimiter = new TurnLimiter(config.game.maxTurns);
 
     this.playerService = new PlayerService(this.playerRepository, overrides.clock);
     this.healthService = new HealthService(this.database, this.providerHealth);

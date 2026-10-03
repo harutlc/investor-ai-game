@@ -82,6 +82,47 @@ const DecisionConfigSchema = z
   })
   .strict();
 
+/** Probability-like setting (a threshold or weight between 0 and 1). */
+const Unit = z.number().min(0).max(1);
+
+/** The negotiation policy's thresholds and weights; see the negotiation-policy spec. */
+const PolicyConfigSchema = z
+  .object({
+    /** Minimum `accept` score (0 = definitely reject … 4 = definitely accept) for the investor to accept. */
+    acceptMinLevel: z.number().min(0).max(4),
+    /** Minimum `good_deal` probability for the investor to accept. */
+    goodDealMin: Unit,
+    /** Minimum confidence for a `walk_away` reaction to end the game; below it the investor rejects. */
+    walkAwayMinConfidence: Unit,
+    /** Stage A injection probability at which the investor brushes the move off. */
+    injectionThreshold: Unit,
+    /** `insult` probability at which the player's rudeness costs patience. */
+    insultThreshold: Unit,
+    /** Concession steps per `concession_size`, multiplied by the persona's concession step. */
+    concessionSteps: z
+      .object({
+        none: z.number().nonnegative(),
+        small: z.number().nonnegative(),
+        medium: z.number().nonnegative(),
+        large: z.number().nonnegative(),
+      })
+      .strict()
+      .refine((s) => s.none <= s.small && s.small <= s.medium && s.medium <= s.large, {
+        error: 'must not decrease from none to large',
+      }),
+    /** Patience lost per event. */
+    patienceCost: z
+      .object({
+        reject: z.number().int().nonnegative(),
+        insult: z.number().int().nonnegative(),
+        injection: z.number().int().nonnegative(),
+      })
+      .strict(),
+    /** How strongly `good_deal` moves interest each turn. */
+    interestWeight: Unit,
+  })
+  .strict();
+
 const GameConfigSchema = z
   .object({
     currency: z.literal('EUR'),
@@ -101,6 +142,7 @@ const GameConfigSchema = z
         debrief: z.boolean(),
       })
       .strict(),
+    policy: PolicyConfigSchema,
   })
   .strict();
 
