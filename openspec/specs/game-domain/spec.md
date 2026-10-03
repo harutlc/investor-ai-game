@@ -145,3 +145,10 @@ Amounts that break the money rules MUST be rejected with an error instead of ret
 #### Scenario: Full amount
 - **WHEN** €1,500,000 is formatted in full
 - **THEN** the result is `€1,500,000`
+
+### Requirement: Game list contract
+The system SHALL define a game summary with `id`, the persona's public profile, the startup's `name`, `status`, `turn`, `maxTurns`, the investor's current offer (or null), and ISO-8601 `createdAt` and `updatedAt`, and a game list `{ games: GameSummary[] }`. Both MUST reject unknown fields, so hidden investor numbers cannot be added to them.
+
+#### Scenario: Hidden field rejected
+- **WHEN** a game summary contains a `budget` field
+- **THEN** validation fails

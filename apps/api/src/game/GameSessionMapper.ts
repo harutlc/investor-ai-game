@@ -2,9 +2,11 @@ import {
   ChatMessageSchema,
   DecisionInsightsDtoSchema,
   GameSessionDtoSchema,
+  GameSummaryDtoSchema,
   type ChatMessage,
   type DecisionInsightsDto,
   type GameSessionDto,
+  type GameSummaryDto,
   type Offer,
 } from '@investor/shared';
 import type { InvestorPersona } from '../personas/InvestorPersona.js';
@@ -42,6 +44,21 @@ export class GameSessionMapper {
       meters: this.meters.toMeters(session.investorState),
       messages: messages.map((message) => this.toMessage(message)),
       options: session.status === 'negotiating' ? session.playerOptions : [],
+      createdAt: session.createdAt.toISOString(),
+      updatedAt: session.updatedAt.toISOString(),
+    });
+  }
+
+  /** A game for the list: no transcript, no options. */
+  toSummary(session: GameSession, persona: InvestorPersona): GameSummaryDto {
+    return GameSummaryDtoSchema.parse({
+      id: session.id,
+      persona: persona.toPublicDto(),
+      startupName: session.pitch.name,
+      status: session.status,
+      turn: session.turn,
+      maxTurns: this.maxTurns,
+      currentInvestorOffer: session.currentInvestorOffer,
       createdAt: session.createdAt.toISOString(),
       updatedAt: session.updatedAt.toISOString(),
     });

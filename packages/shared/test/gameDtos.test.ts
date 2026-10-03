@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   CreateGameRequestSchema,
   DecisionInsightsDtoSchema,
+  GameListDtoSchema,
   GameSessionDtoSchema,
+  GameSummaryDtoSchema,
   InvestorPersonaDtoSchema,
   PersonaListDtoSchema,
   PlayTurnRequestSchema,
@@ -151,5 +153,44 @@ describe('PlayTurnRequestSchema', () => {
       PlayTurnRequestSchema.safeParse({ offer: { investment: 500_000, equity: 15, impliedValuation: 1 } })
         .success,
     ).toBe(false);
+  });
+});
+
+describe('GameSummaryDtoSchema', () => {
+  const summary = {
+    id: '3f1c2b7e-8a4d-4c1e-9f2a-1b2c3d4e5f60',
+    persona: {
+      id: 'greedy-shark',
+      name: 'Rex Calloway',
+      avatar: '🦈',
+      tagline: 'Haggles.',
+      traits: ['greedy'],
+    },
+    startupName: 'GreenCharge',
+    status: 'negotiating',
+    turn: 2,
+    maxTurns: 15,
+    currentInvestorOffer: {
+      investment: 500_000,
+      equity: 30,
+      impliedValuation: 1_666_667,
+      from: 'investor',
+      turn: 0,
+    },
+    createdAt: '2026-10-03T10:00:00.000Z',
+    updatedAt: '2026-10-03T10:05:00.000Z',
+  };
+
+  it('accepts a valid summary and a list of them', () => {
+    expect(GameSummaryDtoSchema.safeParse(summary).success).toBe(true);
+    expect(GameListDtoSchema.safeParse({ games: [summary] }).success).toBe(true);
+  });
+
+  it('accepts a game without an investor offer', () => {
+    expect(GameSummaryDtoSchema.safeParse({ ...summary, currentInvestorOffer: null }).success).toBe(true);
+  });
+
+  it('rejects a hidden field', () => {
+    expect(GameSummaryDtoSchema.safeParse({ ...summary, budget: 600_000 }).success).toBe(false);
   });
 });

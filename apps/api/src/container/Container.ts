@@ -19,6 +19,7 @@ import { TurnLock } from '../game/TurnLock.js';
 import { ApiServer } from '../http/ApiServer.js';
 import type { Controller } from '../http/controllers/Controller.js';
 import { CsrfController } from '../http/controllers/CsrfController.js';
+import { GameController } from '../http/controllers/GameController.js';
 import { HealthController } from '../http/controllers/HealthController.js';
 import { PersonaController } from '../http/controllers/PersonaController.js';
 import { PlaygroundController } from '../http/controllers/PlaygroundController.js';
@@ -210,7 +211,11 @@ export class Container {
     this.healthService = new HealthService(this.database, this.providerHealth);
 
     const csrf = config.security.csrf.enabled ? new CsrfProtection(config) : undefined;
-    const controllers: Controller[] = [new SessionController(), new PersonaController(this.personaCatalog)];
+    const controllers: Controller[] = [
+      new SessionController(),
+      new PersonaController(this.personaCatalog),
+      new GameController(this.gameEngine, this.gameSessionService),
+    ];
     // Without CSRF there is no token to hand out, so GET /api/csrf-token is simply not mounted (404).
     if (csrf) controllers.push(new CsrfController(csrf));
     // Hard production gate: the playground spends real provider money and must never be exposed there.

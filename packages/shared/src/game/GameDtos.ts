@@ -51,6 +51,23 @@ export const GameSessionDtoSchema = z
   })
   .strict();
 
+/** One of a player's games, for the game list: no transcript, no options, no hidden numbers. */
+export const GameSummaryDtoSchema = z
+  .object({
+    id: z.uuid(),
+    persona: InvestorPersonaDtoSchema,
+    startupName: z.string().min(1).max(80),
+    status: GameStatusSchema,
+    turn: z.number().int().nonnegative(),
+    maxTurns: z.number().int().positive(),
+    currentInvestorOffer: OfferSchema.nullable(),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const GameListDtoSchema = z.object({ games: z.array(GameSummaryDtoSchema) }).strict();
+
 /** The result of one played turn: the updated session plus the messages this turn added. */
 export const TurnResultDtoSchema = z
   .object({
@@ -110,6 +127,8 @@ export const PlayTurnRequestSchema = z
 export type InvestorPersonaDto = z.infer<typeof InvestorPersonaDtoSchema>;
 export type PersonaListDto = z.infer<typeof PersonaListDtoSchema>;
 export type GameSessionDto = z.infer<typeof GameSessionDtoSchema>;
+export type GameSummaryDto = z.infer<typeof GameSummaryDtoSchema>;
+export type GameListDto = z.infer<typeof GameListDtoSchema>;
 export type TurnResultDto = z.infer<typeof TurnResultDtoSchema>;
 export type DecisionStage = z.infer<typeof DecisionStageSchema>;
 export type DecisionLogEntryDto = z.infer<typeof DecisionLogEntryDtoSchema>;

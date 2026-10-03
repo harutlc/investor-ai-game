@@ -1,4 +1,4 @@
-import type { DecisionInsightsDto, GameSessionDto, Offer } from '@investor/shared';
+import type { DecisionInsightsDto, GameListDto, GameSessionDto, Offer } from '@investor/shared';
 import { GameNotFoundError } from '../errors/GameNotFoundError.js';
 import type { InvestorPersona } from '../personas/InvestorPersona.js';
 import type { PersonaCatalog } from '../personas/PersonaCatalog.js';
@@ -31,6 +31,15 @@ export class GameSessionService {
 
   getSession(playerId: string, gameId: string): GameSessionDto {
     return this.view(this.load(playerId, gameId));
+  }
+
+  /** The player's games, newest first, as summaries (no transcripts are loaded). */
+  listSessions(playerId: string): GameListDto {
+    return {
+      games: this.sessions
+        .listForPlayer(playerId)
+        .map((session) => this.mapper.toSummary(session, this.persona(session.personaId))),
+    };
   }
 
   getInsights(playerId: string, gameId: string): DecisionInsightsDto {

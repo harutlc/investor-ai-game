@@ -280,6 +280,25 @@ All model calls finish before anything is written; then the turn's messages, off
 | `INVALID_MOVE`     | 422    | E.g. an option id that is not on offer                                                      |
 | `TURN_IN_PROGRESS` | 409    | A second move while the game's previous turn is still running (one turn at a time per game) |
 
+## Game API
+
+All routes sit under `/api/games`, behind the player cookie, CSRF (for POSTs when enabled) and the rate limits. Every response is `Cache-Control: no-store`, and none carries the investor's hidden numbers (an HTTP test plays a whole game to check this).
+
+| Route                         | Body                                                                              | Response                                                 |
+| ----------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `POST /api/games`             | `{ personaId, pitch }`                                                            | 201 and the game (`GameSessionDto`)                      |
+| `GET /api/games`              | —                                                                                 | 200 `{ games: [...] }`, the player's games, newest first |
+| `GET /api/games/:id`          | —                                                                                 | 200 and the game                                         |
+| `POST /api/games/:id/turns`   | exactly one of `{ optionId }`, `{ offer: { investment, equity } }`, `{ message }` | 200 `{ session, newMessages }`                           |
+| `GET /api/games/:id/insights` | —                                                                                 | 200 `{ entries: [...] }`, the decision log per turn      |
+
+Errors use the standard envelope: 400 `VALIDATION_ERROR` (bad body or a malformed `:id`), 404 `NOT_FOUND` (unknown game or someone else's), 422 `INVALID_MOVE`, 409 `GAME_FINISHED` / `TURN_IN_PROGRESS`, 503 / 502 when the decision provider fails.
+
+```bash
+curl -s -c jar -b jar localhost:3001/api/games -H 'Content-Type: application/json' \
+  -d '{"personaId":"greedy-shark","pitch":{"name":"GreenCharge","sector":"EV charging","description":"Fast EV chargers.","valuation":2000000,"askAmount":500000}}'
+```
+
 ## Testing the API with Postman
 
 `postman/` holds a collection and a local environment:
@@ -291,17 +310,17 @@ All model calls finish before anything is written; then the turn's messages, off
 
 The collection's folders:
 
-| Folder          | What it does                                                                                              |
-| --------------- | --------------------------------------------------------------------------------------------------------- |
-| System          | Health check                                                                                              |
-| Session & CSRF  | Session and CSRF token                                                                                    |
-| Game            | List personas (public fields only)                                                                        |
-| Playground      | Thinking text, thinking JSON, and the decision endpoint with the tutor's question set                     |
-| Security checks | Missing or forged CSRF token, form body, malformed JSON, validation errors, 404, allowed and blocked CORS |
+| Folder          | What it does                                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| System          | Health check                                                                                                                                               |
+| Session & CSRF  | Session and CSRF token                                                                                                                                     |
+| Game            | List personas, then a full game: start, list, get, play turns (offer, message, option) and insights; every response is checked for hidden investor numbers |
+| Playground      | Thinking text, thinking JSON, and the decision endpoint with the tutor's question set                                                                      |
+| Security checks | Missing or forged CSRF token, form body, malformed JSON, validation errors, 404, allowed and blocked CORS                                                  |
 
 Every response is also checked for the security headers and, on errors, for the error envelope.
 
-With fake providers, _Thinking: JSON_ fails with 502 by design, because the fake has no scripted JSON. Playground requests count against the mutation rate limit of 60 per 15 minutes. With CSRF enabled, run _Get CSRF token_ again after clearing cookies, because the token is bound to the player cookie.
+With fake providers, _Thinking: JSON_ fails with 502 by design, because the fake has no scripted JSON. Playground requests and game moves count against the mutation rate limit of 60 per 15 minutes. With CSRF enabled, run _Get CSRF token_ again after clearing cookies, because the token is bound to the player cookie.
 
 To run the collection from the terminal with [Newman](https://www.npmjs.com/package/newman):
 

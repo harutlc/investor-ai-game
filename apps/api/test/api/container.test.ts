@@ -1,3 +1,4 @@
+import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { InvestorBrain } from '../../src/brain/InvestorBrain.js';
 import { GameEngine } from '../../src/game/GameEngine.js';
@@ -148,5 +149,12 @@ describe('Container game wiring', () => {
     const { container } = createTestApp();
     expect(container.gameEngine).toBeInstanceOf(GameEngine);
     expect(container.gameSessionService).toBeInstanceOf(GameSessionService);
+  });
+
+  it('mounts /api/games', async () => {
+    const { app } = createTestApp();
+    const res = await request(app).get('/api/games');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ games: [] });
   });
 });

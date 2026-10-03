@@ -59,6 +59,14 @@
       "key": "personaId",
       "value": "",
       "description": "Set by \"List personas\" (the first persona's id), for the game endpoints"
+    },
+    {
+      "key": "gameId",
+      "value": ""
+    },
+    {
+      "key": "optionId",
+      "value": ""
     }
   ],
   "item": [
@@ -215,6 +223,373 @@
               "path": ["api", "personas"]
             },
             "description": "The investors a player can choose from: public profiles only, never the hidden negotiation numbers."
+          },
+          "response": []
+        },
+        {
+          "id": "7d82b78c-3ad6-5d3a-89f1-f9f8df502ae0",
+          "name": "Start game",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 503 || pm.response.code === 502) {",
+                  "  console.warn('Provider error ' + pm.response.json().error.code + ': is the active provider running? Check GET /api/health.');",
+                  "}",
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('negotiating on turn 0', () => { pm.expect(body.status).to.eql('negotiating'); pm.expect(body.turn).to.eql(0); });",
+                  "pm.test('opening offer and 3-5 options', () => { pm.expect(body.currentInvestorOffer).to.be.an('object'); pm.expect(body.options.length).to.be.within(3, 5); });",
+                  "const HIDDEN = ['budget', 'minEquity', 'maxEquity', 'patience', 'concessionStep', 'personality', 'toneInstructions', 'interest'];",
+                  "pm.test('no hidden investor numbers', () => HIDDEN.forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "pm.test('not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));",
+                  "pm.collectionVariables.set('gameId', body.id);",
+                  "const options = (body.session || body).options || [];",
+                  "const next = options.find((o) => o.kind === 'counter' || o.kind === 'message');",
+                  "if (next) pm.collectionVariables.set('optionId', next.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/games",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games"]
+            },
+            "description": "Starts a game with the persona chosen in \"List personas\". Code computes the opening offer; the voice writes the first line and options.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"personaId\": \"{{personaId}}\",\n  \"pitch\": {\n    \"name\": \"GreenCharge\",\n    \"sector\": \"EV charging\",\n    \"description\": \"Fast EV chargers for apartment buildings. €18k monthly revenue, growing 12% a month.\",\n    \"valuation\": 2000000,\n    \"askAmount\": 500000\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "c45822cc-edbf-56d3-b9eb-406802bf3770",
+          "name": "List games",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('includes the started game', () => pm.expect(body.games.map((g) => g.id)).to.include(pm.collectionVariables.get('gameId')));",
+                  "const HIDDEN = ['budget', 'minEquity', 'maxEquity', 'patience', 'concessionStep', 'personality', 'toneInstructions', 'interest'];",
+                  "pm.test('no hidden investor numbers', () => HIDDEN.forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "pm.test('not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/games",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games"]
+            },
+            "description": "The current player's games, newest first, as summaries."
+          },
+          "response": []
+        },
+        {
+          "id": "6477ff90-c544-59ad-afaa-292c639513ba",
+          "name": "Get game",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('the started game', () => pm.expect(body.id).to.eql(pm.collectionVariables.get('gameId')));",
+                  "pm.test('meters are hints only', () => pm.expect(body.meters.interestLevel).to.be.oneOf(['low', 'medium', 'high']));",
+                  "const HIDDEN = ['budget', 'minEquity', 'maxEquity', 'patience', 'concessionStep', 'personality', 'toneInstructions', 'interest'];",
+                  "pm.test('no hidden investor numbers', () => HIDDEN.forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "pm.test('not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/games/{{gameId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games", "{{gameId}}"]
+            },
+            "description": "The game's public view: offers, meter hints, transcript and options."
+          },
+          "response": []
+        },
+        {
+          "id": "e6619e2b-a5d7-513d-b7bc-5ef8d871c989",
+          "name": "Play turn: offer",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 503 || pm.response.code === 502) {",
+                  "  console.warn('Provider error ' + pm.response.json().error.code + ': is the active provider running? Check GET /api/health.');",
+                  "}",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('turn advanced', () => pm.expect(body.session.turn).to.be.at.least(1));",
+                  "pm.test('player and reply messages', () => pm.expect(body.newMessages).to.have.lengthOf(2));",
+                  "const HIDDEN = ['budget', 'minEquity', 'maxEquity', 'patience', 'concessionStep', 'personality', 'toneInstructions', 'interest'];",
+                  "pm.test('no hidden investor numbers', () => HIDDEN.forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "pm.test('not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));",
+                  "const options = (body.session || body).options || [];",
+                  "const next = options.find((o) => o.kind === 'counter' || o.kind === 'message');",
+                  "if (next) pm.collectionVariables.set('optionId', next.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/games/{{gameId}}/turns",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games", "{{gameId}}", "turns"]
+            },
+            "description": "A structured offer (the offer form). Runs Stage B, the policy and the voice.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"offer\": {\n    \"investment\": 500000,\n    \"equity\": 15\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "5611cf8d-c5b5-566d-8e05-4b9773f7a54f",
+          "name": "Play turn: message",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 503 || pm.response.code === 502) {",
+                  "  console.warn('Provider error ' + pm.response.json().error.code + ': is the active provider running? Check GET /api/health.');",
+                  "}",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('turn advanced', () => pm.expect(body.session.turn).to.be.at.least(1));",
+                  "pm.test('player and reply messages', () => pm.expect(body.newMessages).to.have.lengthOf(2));",
+                  "const HIDDEN = ['budget', 'minEquity', 'maxEquity', 'patience', 'concessionStep', 'personality', 'toneInstructions', 'interest'];",
+                  "pm.test('no hidden investor numbers', () => HIDDEN.forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "pm.test('not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));",
+                  "const options = (body.session || body).options || [];",
+                  "const next = options.find((o) => o.kind === 'counter' || o.kind === 'message');",
+                  "if (next) pm.collectionVariables.set('optionId', next.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/games/{{gameId}}/turns",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games", "{{gameId}}", "turns"]
+            },
+            "description": "Free text: Stage A reads the intent and picks the numbers, then Stage B decides.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"€500k for 20%. We're growing 12% a month.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "6c51d0a3-8a0b-5604-a01c-f39a634b31bc",
+          "name": "Play turn: option",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 503 || pm.response.code === 502) {",
+                  "  console.warn('Provider error ' + pm.response.json().error.code + ': is the active provider running? Check GET /api/health.');",
+                  "}",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('turn advanced', () => pm.expect(body.session.turn).to.be.at.least(1));",
+                  "pm.test('player and reply messages', () => pm.expect(body.newMessages).to.have.lengthOf(2));",
+                  "const HIDDEN = ['budget', 'minEquity', 'maxEquity', 'patience', 'concessionStep', 'personality', 'toneInstructions', 'interest'];",
+                  "pm.test('no hidden investor numbers', () => HIDDEN.forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "pm.test('not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));",
+                  "const options = (body.session || body).options || [];",
+                  "const next = options.find((o) => o.kind === 'counter' || o.kind === 'message');",
+                  "if (next) pm.collectionVariables.set('optionId', next.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/games/{{gameId}}/turns",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games", "{{gameId}}", "turns"]
+            },
+            "description": "Picks a generated option (set by the previous request).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"optionId\": \"{{optionId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "100e0381-5ab7-5329-b532-44e1a97b3924",
+          "name": "Insights",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('decision log entries', () => { pm.expect(body.entries).to.be.an('array').that.is.not.empty; body.entries.forEach((e) => pm.expect(e.stage).to.be.oneOf(['A', 'B', 'debrief'])); });",
+                  "const HIDDEN = ['budget', 'minEquity', 'maxEquity', 'patience', 'concessionStep', 'personality', 'toneInstructions', 'interest'];",
+                  "pm.test('no hidden investor numbers', () => HIDDEN.forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "pm.test('not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/games/{{gameId}}/insights",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "games", "{{gameId}}", "insights"]
+            },
+            "description": "The decision model's questions and answers per turn, for the brain-insights panel."
           },
           "response": []
         }

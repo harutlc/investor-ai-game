@@ -123,3 +123,10 @@ The system SHALL return a game's decision log for its owner: one entry per decis
 #### Scenario: Insights after a free-text turn
 - **WHEN** a player's free-text counter on turn 1 has been evaluated
 - **THEN** the insights list Stage A entries and Stage B entries for turn 1
+
+### Requirement: Listing a player's games
+The system SHALL list a player's games as summaries, newest first, built from the stored sessions without loading their transcripts. Other players' games MUST NOT be included.
+
+#### Scenario: Newest first
+- **WHEN** a player started game A and then game B
+- **THEN** the list is B, A

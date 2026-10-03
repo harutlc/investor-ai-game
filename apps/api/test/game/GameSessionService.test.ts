@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { GameSummaryDtoSchema } from '@investor/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Database } from '../../src/db/Database.js';
 import { GameNotFoundError } from '../../src/errors/GameNotFoundError.js';
@@ -10,7 +11,7 @@ import { DecisionLogRepository } from '../../src/repositories/DecisionLogReposit
 import { GameSessionRepository } from '../../src/repositories/GameSessionRepository.js';
 import { MessageRepository } from '../../src/repositories/MessageRepository.js';
 import { OfferRepository } from '../../src/repositories/OfferRepository.js';
-import { T0, seedPlayer, seedSession } from '../support/gameFixtures.js';
+import { T0, seedPlayer, seedSession, sessionFixture } from '../support/gameFixtures.js';
 
 let database: Database;
 let service: GameSessionService;
@@ -84,5 +85,21 @@ describe('GameSessionService', () => {
     expect(service.getInsights(session.playerId, session.id).entries.map((entry) => entry.stage)).toEqual([
       'A',
     ]);
+  });
+
+  it("lists only the player's games, newest first, as valid summaries", () => {
+    const playerId = seedPlayer(database);
+    const sessions = new GameSessionRepository(database.db);
+    const older = sessions.create(sessionFixture(playerId, { createdAt: T0 }));
+    const newer = sessions.create(
+      sessionFixture(playerId, { createdAt: new Date(T0.getTime() + 60_000), currentInvestorOffer: null }),
+    );
+    seedSession(database);
+
+    const { games } = service.listSessions(playerId);
+
+    expect(games.map((game) => game.id)).toEqual([newer.id, older.id]);
+    for (const game of games) expect(GameSummaryDtoSchema.safeParse(game).success).toBe(true);
+    expect(games[0]).toMatchObject({ startupName: 'GreenCharge', currentInvestorOffer: null, maxTurns: 15 });
   });
 });
