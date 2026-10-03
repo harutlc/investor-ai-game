@@ -1,0 +1,25 @@
+{
+  "server": {
+    "port": 3001,
+    "trustProxy": false,
+    "bodyLimit": "100kb",
+    "shutdownTimeoutMs": 10000
+  },
+  "cors": {
+    "origins": ["http://localhost:5173"]
+  },
+  "security": {
+    "rateLimit": {
+      "windowMs": 900000,
+      "max": 300,
+      "mutationMax": 60
+    },
+    "sessionMaxAgeDays": 30
+  },
+  "database": {
+    "file": "./data/game.sqlite"
+  },
+  "logging": {
+    "level": "info"
+  }
+}

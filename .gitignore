@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# local database
+data/
+*.sqlite
+*.sqlite-*
+
+# OS / editor
+.DS_Store
+.idea/workspace.xml

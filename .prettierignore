@@ -1,0 +1,11 @@
+dist
+coverage
+pnpm-lock.yaml
+apps/api/src/db/migrations
+openspec
+.agents
+.claude
+.idea
+homework-raw.txt
+TASKS.md
+homework-en.md
