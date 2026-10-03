@@ -54,6 +54,11 @@
       "key": "playerId",
       "value": "",
       "description": "Set by \"Get session\""
+    },
+    {
+      "key": "personaId",
+      "value": "",
+      "description": "Set by \"List personas\" (the first persona's id), for the game endpoints"
     }
   ],
   "item": [
@@ -173,6 +178,43 @@
               "path": ["api", "csrf-token"]
             },
             "description": "Returns 404 when `security.csrf.enabled` is false (the committed default): the collection then records `csrfEnabled=false` and skips the CSRF-specific checks."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "id": "0d797ba8-a215-53eb-a568-cfca485270f7",
+      "name": "Game",
+      "item": [
+        {
+          "id": "f47d7a58-7652-5f9c-882e-b32e571a0700",
+          "name": "List personas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('six personas', () => pm.expect(body.personas).to.have.lengthOf(6));",
+                  "pm.test('public fields only', () => body.personas.forEach((p) => pm.expect(p).to.have.all.keys('id', 'name', 'avatar', 'tagline', 'traits')));",
+                  "pm.test('no hidden numbers', () => ['budget', 'minEquity', 'maxEquity', 'patience', 'personality', 'toneInstructions'].forEach((key) => pm.expect(pm.response.text()).to.not.include(`\"${key}\"`)));",
+                  "if (body.personas.length) pm.collectionVariables.set('personaId', body.personas[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/personas",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "personas"]
+            },
+            "description": "The investors a player can choose from: public profiles only, never the hidden negotiation numbers."
           },
           "response": []
         }

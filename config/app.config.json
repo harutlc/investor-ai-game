@@ -50,6 +50,7 @@
     },
     "decision": {
       "provider": "laya",
+      "minConfidence": 0.55,
       "providers": {
         "laya": {
           "baseUrl": "http://localhost:8000",
@@ -67,6 +68,20 @@
       }
     },
     "healthCacheMs": 30000
+  },
+  "game": {
+    "currency": "EUR",
+    "maxTurns": 15,
+    "defaultValuation": 2000000,
+    "features": {
+      "phases": false,
+      "dueDiligence": false,
+      "dealTerms": false,
+      "hiddenFacts": false,
+      "marketEvents": false,
+      "eventChance": 0.15,
+      "debrief": false
+    }
   },
   "dev": {
     "playground": true

@@ -1,19 +1,19 @@
 import { z } from 'zod';
 import { DecisionQuestionsSchema, DecisionStateSchema } from '../decision/DecisionSchemas.js';
 
-export const ChatMessageSchema = z
+export const PlaygroundMessageSchema = z
   .object({
     role: z.enum(['user', 'assistant']),
     content: z.string().min(1).max(4000),
   })
   .strict();
 
-export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+export type PlaygroundMessage = z.infer<typeof PlaygroundMessageSchema>;
 
 const conversation = {
   system: z.string().min(1).max(8000).optional(),
   messages: z
-    .array(ChatMessageSchema)
+    .array(PlaygroundMessageSchema)
     .min(1)
     .max(20)
     .refine((messages) => messages[0]?.role === 'user', { error: 'the first message must be from the user' }),

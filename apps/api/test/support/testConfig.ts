@@ -62,6 +62,7 @@ export function testConfig(overrides: Overrides = {}): AppConfig {
       },
       decision: {
         provider: 'fake',
+        minConfidence: 0.55,
         providers: {
           laya: { baseUrl: 'http://laya.test:8000', model: 'english', timeoutMs: 1000, maxRetries: 0 },
           jev: { baseUrl: 'https://jev.test', model: 'jev-latest', timeoutMs: 1000, maxRetries: 0 },
@@ -69,6 +70,20 @@ export function testConfig(overrides: Overrides = {}): AppConfig {
         },
       },
       healthCacheMs: 30_000,
+    },
+    game: {
+      currency: 'EUR',
+      maxTurns: 15,
+      defaultValuation: 2_000_000,
+      features: {
+        phases: false,
+        dueDiligence: false,
+        dealTerms: false,
+        hiddenFacts: false,
+        marketEvents: false,
+        eventChance: 0.15,
+        debrief: false,
+      },
     },
     dev: { playground: overrides.playground ?? true },
     secrets: { cookieSecret: TEST_COOKIE_SECRET, csrfSecret: TEST_CSRF_SECRET },

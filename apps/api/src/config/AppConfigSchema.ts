@@ -1,3 +1,4 @@
+import { MoneySchema } from '@investor/shared';
 import { z } from 'zod';
 
 const MIN_SECRET_LENGTH = 32;
@@ -69,11 +70,35 @@ const systemOneProvider = z.object({ baseUrl: httpUrl, model, ...transport }).st
 const DecisionConfigSchema = z
   .object({
     provider: z.enum(DECISION_PROVIDERS),
+    /** Answers below this confidence count as uncertain (noul: the likelier outcome's probability). */
+    minConfidence: z.number().min(0).max(1),
     providers: z
       .object({
         jev: systemOneProvider,
         laya: systemOneProvider,
         fake: z.object({}).strict(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const GameConfigSchema = z
+  .object({
+    currency: z.literal('EUR'),
+    maxTurns: z.number().int().min(1).max(50),
+    /** Pre-money valuation suggested for a new pitch. */
+    defaultValuation: MoneySchema,
+    /** v2 features; each stays off until its feature exists. */
+    features: z
+      .object({
+        phases: z.boolean(),
+        dueDiligence: z.boolean(),
+        dealTerms: z.boolean(),
+        hiddenFacts: z.boolean(),
+        marketEvents: z.boolean(),
+        /** Chance of a market event between turns, when marketEvents is on. */
+        eventChance: z.number().min(0).max(1),
+        debrief: z.boolean(),
       })
       .strict(),
   })
@@ -133,6 +158,7 @@ export const AppConfigSchema = z
         healthCacheMs: z.number().int().min(0),
       })
       .strict(),
+    game: GameConfigSchema,
     dev: z
       .object({
         /** Mounts /api/dev/* outside production. */

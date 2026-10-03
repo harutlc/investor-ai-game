@@ -252,6 +252,48 @@ describe('ConfigLoader: LLM providers', () => {
   });
 });
 
+describe('ConfigLoader: game settings', () => {
+  it('loads the committed game defaults with every v2 feature off', () => {
+    const config = load();
+    expect(config.game.currency).toBe('EUR');
+    expect(config.game.maxTurns).toBe(15);
+    expect(config.game.defaultValuation).toBe(2_000_000);
+    expect(config.llm.decision.minConfidence).toBe(0.55);
+    const { eventChance, ...flags } = config.game.features;
+    expect(eventChance).toBe(0.15);
+    expect(Object.values(flags).every((flag) => flag === false)).toBe(true);
+  });
+
+  it('names an invalid turn limit', () => {
+    writeConfig((config) => {
+      config.game!.maxTurns = 0;
+    });
+    expect(loadError({ COOKIE_SECRET, CSRF_SECRET }).issues.some((i) => i.startsWith('game.maxTurns'))).toBe(
+      true,
+    );
+  });
+
+  it('names an invalid confidence threshold', () => {
+    writeConfig((config) => {
+      (config.llm!.decision as Record<string, unknown>).minConfidence = 1.5;
+    });
+    expect(
+      loadError({ COOKIE_SECRET, CSRF_SECRET }).issues.some((i) =>
+        i.startsWith('llm.decision.minConfidence'),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects an unsupported currency', () => {
+    writeConfig((config) => {
+      config.game!.currency = 'USD';
+    });
+    expect(loadError({ COOKIE_SECRET, CSRF_SECRET }).issues.some((i) => i.startsWith('game.currency'))).toBe(
+      true,
+    );
+  });
+});
+
 describe('WorkspaceRoot', () => {
   it('finds the repo root from apps/api', () => {
     expect(WorkspaceRoot.find(path.join(repoRoot, 'apps/api'))).toBe(repoRoot);

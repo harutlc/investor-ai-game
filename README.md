@@ -49,9 +49,12 @@ apps/api/            Express API
   src/services/      business logic
   src/http/          ApiServer, controllers/, middleware/
   src/errors/        AppError and one subclass per error
-  src/llm/           LLM providers: thinking/ (Ollama, Anthropic, fake), decision/ (Jev, Laya, fake)
+  src/llm/           LLM providers: thinking/ (Ollama, Anthropic, fake), decision/ (Jev, Laya, fake,
+                     ConfidenceGate, DecisionLogger)
+  src/game/          API-only game types (the investor's hidden state)
+  src/personas/      investor personas: definitions, validation, catalog
   test/              Vitest + Supertest (in-memory SQLite)
-packages/shared/     zod schemas and types shared with the future web app
+packages/shared/     zod schemas and types shared with the future web app (game contracts, ValuationCalculator)
 config/app.config.json   non-secret settings (committed)
 .env                 secrets and overrides (git-ignored)
 ```
@@ -92,6 +95,16 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 | `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one  |
 
 Invalid configuration stops startup with a list of every problem. Secret values are never printed.
+
+Game settings live in the `game` section and have no environment overrides:
+
+| Key                          | Meaning                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `game.currency`              | `EUR` (the only supported value)                                         |
+| `game.maxTurns`              | Turn limit per game (1–50, default 15)                                   |
+| `game.defaultValuation`      | Pre-money valuation suggested for a new pitch (default €2,000,000)       |
+| `game.features.*`            | v2 feature flags (`phases`, `dueDiligence`, …); all off until they exist |
+| `llm.decision.minConfidence` | Decision answers below this confidence count as uncertain (default 0.55) |
 
 ## LLM providers
 
@@ -171,6 +184,24 @@ post /api/dev/decision '{"state":{"player_offer":{"investment":500000,"equity":1
 
 Without Ollama or laya-serve running, start the API with `THINKING_PROVIDER=fake DECISION_PROVIDER=fake pnpm dev`. Fake providers are refused in production.
 
+## Investor personas
+
+`GET /api/personas` lists the six investors a player can pick: `greedy-shark`, `generous-angel`, `angry-rude`, `content-well-fed`, `skeptical-analyst` and `impact-investor`. Each persona has a public profile (`id`, `name`, `avatar`, `tagline`, `traits`), and that is all the endpoint returns.
+
+The rest stays on the server, in `apps/api/src/personas/personaDefinitions.ts`:
+
+- a **brain description** (`personality`, `goals`) for the decision model
+- **voice instructions** (`toneInstructions`) for the thinking model
+- **hidden numbers** (`budget`, `minEquity`, `maxEquity`, `initialInterest`, `patience`, `concessionStep`) that code negotiates with
+
+Every definition is validated at startup; an invalid one stops the server with a message naming the persona and field.
+
+```bash
+curl -s localhost:3001/api/personas
+```
+
+Decision calls made for a game go through `DecisionLogger`, which records the questions, answers (or error code) and latency in the `decision_logs` table for the brain-insights panel.
+
 ## Testing the API with Postman
 
 `postman/` holds a collection and a local environment:
@@ -186,6 +217,7 @@ The collection's folders:
 | --------------- | --------------------------------------------------------------------------------------------------------- |
 | System          | Health check                                                                                              |
 | Session & CSRF  | Session and CSRF token                                                                                    |
+| Game            | List personas (public fields only)                                                                        |
 | Playground      | Thinking text, thinking JSON, and the decision endpoint with the tutor's question set                     |
 | Security checks | Missing or forged CSRF token, form body, malformed JSON, validation errors, 404, allowed and blocked CORS |
 
