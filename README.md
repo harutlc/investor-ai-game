@@ -54,6 +54,7 @@ apps/api/            Express API
   src/game/          the game master: hidden investor state, NegotiationPolicy, meters, turn limit
   src/personas/      investor personas: definitions, validation, catalog
   src/brain/         the investor's brain: decision state, offer candidates, question sets, InvestorBrain
+  src/voice/         the investor's voice: prompts, lines, player options, number checks (InvestorVoice)
   test/              Vitest + Supertest (in-memory SQLite)
 packages/shared/     zod schemas and types shared with the future web app (game contracts, ValuationCalculator, MoneyFormatter)
 config/app.config.json   non-secret settings (committed)
@@ -249,6 +250,17 @@ Code is the game master. `NegotiationPolicy` (in `apps/api/src/game/`) turns the
 **Counter-offers:** equity moves from the investor's offer toward the player's by `concessionSteps[concession_size] × concessionStep` (the persona's), never past the player's number, and stays within the persona's equity limits; the investment is the player's ask, capped at the budget. Example: 30% vs the player's 15%, `medium`, step 4 → 22%.
 
 After each move `InvestorStateUpdater` moves interest by `(good_deal − 0.5) × interestWeight` and takes patience for rejections and insults. `MeterHintMapper` shows the player only hints (`low`/`medium`/`high` interest, "Tapping the table"). `TurnLimiter` ends the game: `deal` (either side accepts), `rejected_by_player`, `walked_away`, or `out_of_turns` at `game.maxTurns`.
+
+## Investor voice
+
+The thinking model is the investor's **voice**: it phrases what code decided and suggests the player's replies. `InvestorVoice` (in `apps/api/src/voice/`) produces, for each turn and in parallel:
+
+- **The investor's line.** The prompt carries the persona's name, personality and tone, the startup, the last 8 chat messages, and the decision: the action plus the exact numbers to state (`€550k (€550,000) for 24%`). Prompts never include the investor's hidden numbers, and player-written text (messages and the pitch) is wrapped in `<player_message>` / `<player_pitch>` tags and marked as untrusted. The opening offer is computed in code (the founder's ask, capped at the budget, for the persona's maximum equity) and only phrased by the voice.
+- **The player's options.** The model suggests 1–3 replies as JSON (counter, message, leverage). Code validates every counter's numbers, computes its implied valuation, rewrites a label that disagrees with its numbers, drops duplicates and options with invented numbers, and always adds **Accept €X for Y%** and **Walk away**, so there are 3–5 options.
+
+**Number check:** `NumberConsistencyChecker` reads every amount and percentage in a generated line with the same extractor Stage A uses. Only numbers in play are allowed (the offers on the table, their valuations and the gaps between them, the pitch, and numbers the player wrote); amounts may be rounded by up to 2% (`€3.3M` for €3,333,333). Counters, accepts and the opening must state the decided offer. A failing line is regenerated once with the problems listed; if it fails again, a code-written line is used ("I can do €550k for 24%. That's my offer.").
+
+**Fallbacks:** when the thinking provider is down or keeps misbehaving, the turn still completes with the template line and code-built options. Each fallback is flagged in the result and logged at `warn` with the action and error code only.
 
 ## Testing the API with Postman
 

@@ -2,12 +2,14 @@ import type { Logger } from 'pino';
 import { InvestorBrain } from '../brain/InvestorBrain.js';
 import { mvpQuestionSets } from '../brain/mvpQuestionSets.js';
 import { NegotiationStateBuilder } from '../brain/NegotiationStateBuilder.js';
+import { OfferCandidateExtractor } from '../brain/OfferCandidateExtractor.js';
 import { QuestionSetRegistry } from '../brain/QuestionSetRegistry.js';
 import type { AppConfig } from '../config/AppConfig.js';
 import { Database } from '../db/Database.js';
 import { InvestorStateUpdater } from '../game/InvestorStateUpdater.js';
 import { MeterHintMapper } from '../game/MeterHintMapper.js';
 import { NegotiationPolicy } from '../game/NegotiationPolicy.js';
+import { OpeningOfferCalculator } from '../game/OpeningOfferCalculator.js';
 import { TurnLimiter } from '../game/TurnLimiter.js';
 import { ApiServer } from '../http/ApiServer.js';
 import type { Controller } from '../http/controllers/Controller.js';
@@ -34,6 +36,15 @@ import { PersonaCatalog } from '../personas/PersonaCatalog.js';
 import { PlayerRepository } from '../repositories/PlayerRepository.js';
 import { HealthService } from '../services/HealthService.js';
 import { PlayerService, type Clock } from '../services/PlayerService.js';
+import { FallbackLines } from '../voice/FallbackLines.js';
+import { InvestorDialogueGenerator } from '../voice/InvestorDialogueGenerator.js';
+import { InvestorVoice } from '../voice/InvestorVoice.js';
+import { LineWriter } from '../voice/LineWriter.js';
+import { NumberConsistencyChecker } from '../voice/NumberConsistencyChecker.js';
+import { NumbersInPlay } from '../voice/NumbersInPlay.js';
+import { OpeningGenerator } from '../voice/OpeningGenerator.js';
+import { PlayerOptionsGenerator } from '../voice/PlayerOptionsGenerator.js';
+import { PromptBuilder } from '../voice/PromptBuilder.js';
 
 export interface ContainerOverrides {
   logger?: Logger;
@@ -49,7 +60,7 @@ export interface ContainerOverrides {
 
 /**
  * Manual DI: config → logger → database → repositories → LLM providers (+ confidence gate, decision logger)
- * → investor brain → negotiation policy → services → middleware/controllers → server.
+ * → investor brain → negotiation policy → investor voice → services → middleware/controllers → server.
  */
 export class Container {
   readonly logger: Logger;
@@ -75,6 +86,9 @@ export class Container {
   readonly negotiationPolicy: NegotiationPolicy;
   readonly meterHintMapper: MeterHintMapper;
   readonly turnLimiter: TurnLimiter;
+  readonly openingOfferCalculator: OpeningOfferCalculator;
+  /** The voice: lines and player options from the thinking model, number-checked by code. */
+  readonly investorVoice: InvestorVoice;
   readonly playerService: PlayerService;
   readonly healthService: HealthService;
   readonly server: ApiServer;
@@ -124,6 +138,26 @@ export class Container {
     this.negotiationPolicy = new NegotiationPolicy(config.game.policy, this.investorStateUpdater);
     this.meterHintMapper = new MeterHintMapper();
     this.turnLimiter = new TurnLimiter(config.game.maxTurns);
+    this.openingOfferCalculator = new OpeningOfferCalculator();
+
+    // The voice reads numbers with the brain's extractor, so both agree on what a number is.
+    const extractor = new OfferCandidateExtractor();
+    const prompts = new PromptBuilder();
+    const numbersInPlay = new NumbersInPlay(extractor);
+    const checker = new NumberConsistencyChecker(extractor);
+    const lineWriter = new LineWriter(
+      this.thinkingProvider,
+      prompts,
+      numbersInPlay,
+      checker,
+      new FallbackLines(),
+    );
+    this.investorVoice = new InvestorVoice(
+      new OpeningGenerator(lineWriter),
+      new InvestorDialogueGenerator(lineWriter),
+      new PlayerOptionsGenerator(this.thinkingProvider, prompts, numbersInPlay, checker),
+      this.logger,
+    );
 
     this.playerService = new PlayerService(this.playerRepository, overrides.clock);
     this.healthService = new HealthService(this.database, this.providerHealth);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { InvestorBrain } from '../../src/brain/InvestorBrain.js';
 import { NegotiationPolicy } from '../../src/game/NegotiationPolicy.js';
+import { InvestorVoice } from '../../src/voice/InvestorVoice.js';
+import { voiceContext } from '../support/voiceFixtures.js';
 import { ConfidenceGate } from '../../src/llm/decision/ConfidenceGate.js';
 import { DecisionLogger } from '../../src/llm/decision/DecisionLogger.js';
 import { FakeDecisionProvider } from '../../src/llm/decision/FakeDecisionProvider.js';
@@ -116,5 +118,27 @@ describe('Container game wiring', () => {
       patience: 4,
     };
     expect(container.investorStateUpdater.afterInjection(state).patience).toBe(3);
+  });
+
+  it('builds the opening offer calculator and the investor voice on the thinking provider', async () => {
+    const thinkingProvider = new FakeThinkingProvider([
+      "GreenCharge. €500k for 30%, and that's generous.",
+      JSON.stringify({ options: [{ kind: 'message', label: 'Ask about the terms' }] }),
+    ]);
+    const { container } = createTestApp({ thinkingProvider });
+    expect(container.investorVoice).toBeInstanceOf(InvestorVoice);
+
+    const offer = container.openingOfferCalculator.offer(
+      { askAmount: 500_000 },
+      { budget: 700_000, maxEquity: 30 },
+    );
+    const turn = await container.investorVoice.open(voiceContext({ history: [] }), offer);
+
+    expect(turn.line).toEqual({ text: "GreenCharge. €500k for 30%, and that's generous.", fallback: false });
+    expect(turn.options.options.map((option) => option.label)).toEqual([
+      'Ask about the terms',
+      'Accept €500k for 30%',
+      'Walk away',
+    ]);
   });
 });
