@@ -1,4 +1,4 @@
-import { ErrorCode } from '@inverstorm/shared';
+import { ErrorCode } from '@investor/shared';
 import { AppError } from './AppError.js';
 
 export class UnsupportedMediaTypeError extends AppError {

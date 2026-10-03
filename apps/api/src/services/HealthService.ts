@@ -1,4 +1,4 @@
-import type { HealthDto } from '@inverstorm/shared';
+import type { HealthDto } from '@investor/shared';
 import type { Database } from '../db/Database.js';
 import type { ProviderHealthMonitor } from '../llm/ProviderHealthMonitor.js';
 

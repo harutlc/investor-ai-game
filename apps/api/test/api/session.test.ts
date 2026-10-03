@@ -1,4 +1,4 @@
-import { CsrfTokenDtoSchema, SessionDtoSchema } from '@inverstorm/shared';
+import { CsrfTokenDtoSchema, SessionDtoSchema } from '@investor/shared';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createTestApp } from '../support/createTestApp.js';

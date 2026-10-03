@@ -1,5 +1,5 @@
 {
-  "name": "inverstorm-ai-game",
+  "name": "investor-ai-game",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.0",
@@ -7,16 +7,16 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "dev": "pnpm --filter @inverstorm/api dev",
+    "dev": "pnpm --filter @investor/api dev",
     "build": "tsc -b",
-    "start": "pnpm --filter @inverstorm/api start",
+    "start": "pnpm --filter @investor/api start",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:generate": "pnpm --filter @inverstorm/api db:generate",
-    "db:migrate": "pnpm --filter @inverstorm/api db:migrate"
+    "db:generate": "pnpm --filter @investor/api db:generate",
+    "db:migrate": "pnpm --filter @investor/api db:migrate"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

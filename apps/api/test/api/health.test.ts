@@ -1,4 +1,4 @@
-import { HealthDtoSchema } from '@inverstorm/shared';
+import { HealthDtoSchema } from '@investor/shared';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { FakeDecisionProvider } from '../../src/llm/decision/FakeDecisionProvider.js';

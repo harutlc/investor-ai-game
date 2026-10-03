@@ -1,4 +1,4 @@
-import type { SessionDto } from '@inverstorm/shared';
+import type { SessionDto } from '@investor/shared';
 import { Router, type Request, type Response } from 'express';
 import type { Controller } from './Controller.js';
 

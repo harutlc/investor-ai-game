@@ -17,7 +17,7 @@ describe('Database', () => {
   });
 
   it('creates missing parent directories for file databases and enables WAL', () => {
-    const file = path.join(mkdtempSync(path.join(tmpdir(), 'inverstorm-db-')), 'nested/dir/game.sqlite');
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'investor-db-')), 'nested/dir/game.sqlite');
     database = new Database(file);
     expect(database.sqlite.pragma('journal_mode', { simple: true })).toBe('wal');
     expect(database.sqlite.pragma('foreign_keys', { simple: true })).toBe(1);

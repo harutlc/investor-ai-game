@@ -107,6 +107,12 @@ export const AppConfigSchema = z
           })
           .strict(),
         sessionMaxAgeDays: z.number().int().positive(),
+        csrf: z
+          .object({
+            /** Double-submit CSRF tokens on state-changing requests (needs CSRF_SECRET when on). */
+            enabled: z.boolean({ error: 'must be true or false' }),
+          })
+          .strict(),
       })
       .strict(),
     database: z
@@ -136,7 +142,8 @@ export const AppConfigSchema = z
     secrets: z
       .object({
         cookieSecret: secret,
-        csrfSecret: secret,
+        /** Required only while security.csrf.enabled is true. */
+        csrfSecret: secret.optional(),
         anthropicApiKey: z.string().min(1).optional(),
         typesafeApiKey: z.string().min(1).optional(),
         layaApiKey: z.string().min(1).optional(),
@@ -144,9 +151,18 @@ export const AppConfigSchema = z
       .strict(),
   })
   .strict()
+  // Cross-field rules. zod runs them only once every field above is valid, so these (conditional) problems
+  // are reported in a second pass after the basic ones are fixed.
   .superRefine((config, ctx) => {
-    const { secrets, llm, nodeEnv } = config;
-    if (secrets.cookieSecret === secrets.csrfSecret) {
+    const { secrets, llm, nodeEnv, security } = config;
+    if (security.csrf.enabled && !secrets.csrfSecret) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'is required when security.csrf.enabled is true',
+        path: ['secrets', 'csrfSecret'],
+      });
+    }
+    if (secrets.csrfSecret !== undefined && secrets.cookieSecret === secrets.csrfSecret) {
       ctx.addIssue({
         code: 'custom',
         message: 'must differ from COOKIE_SECRET',

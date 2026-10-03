@@ -29,7 +29,7 @@ The system SHALL let selected environment variables override values from the con
 - **THEN** exactly those two origins are allowed and the file's origin list is ignored
 
 ### Requirement: Validation and fail-fast startup
-The system SHALL validate the merged configuration against a schema before it opens any port or database connection. When validation fails, the process MUST exit with a non-zero code and print a message that names every invalid or missing key. The message MUST NOT print secret values.
+The system SHALL validate the merged configuration against a schema before it opens any port or database connection. When validation fails, the process MUST exit with a non-zero code and print a message that names every invalid or missing key. Keys that are required only conditionally (for example `CSRF_SECRET` while CSRF protection is enabled, or the active provider's API key) MAY be reported in a second pass, once the other problems are fixed. The message MUST NOT print secret values.
 
 #### Scenario: Missing secret
 - **WHEN** the API starts without `COOKIE_SECRET`

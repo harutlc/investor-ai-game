@@ -14,7 +14,10 @@
       "max": 300,
       "mutationMax": 60
     },
-    "sessionMaxAgeDays": 30
+    "sessionMaxAgeDays": 30,
+    "csrf": {
+      "enabled": false
+    }
   },
   "database": {
     "file": "./data/game.sqlite"

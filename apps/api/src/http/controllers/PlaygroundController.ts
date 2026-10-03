@@ -5,7 +5,7 @@ import {
   type DecisionResultDto,
   type PlaygroundJsonResponse,
   type PlaygroundTextResponse,
-} from '@inverstorm/shared';
+} from '@investor/shared';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { ValidationError } from '../../errors/ValidationError.js';

@@ -1,4 +1,4 @@
-import { ErrorCode } from '@inverstorm/shared';
+import { ErrorCode } from '@investor/shared';
 import { AppError } from '../../errors/AppError.js';
 
 /** The backend could not be reached or did not answer in time (connection, timeout, 429/529, 5xx, auth). */

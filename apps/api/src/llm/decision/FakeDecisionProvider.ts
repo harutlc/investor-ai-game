@@ -1,4 +1,4 @@
-import type { DecisionAnswer } from '@inverstorm/shared';
+import type { DecisionAnswer } from '@investor/shared';
 import { ProviderUnavailableError } from '../errors/ProviderUnavailableError.js';
 import {
   validateDecisionRequest,

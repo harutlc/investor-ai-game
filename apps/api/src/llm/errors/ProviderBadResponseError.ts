@@ -1,4 +1,4 @@
-import { ErrorCode } from '@inverstorm/shared';
+import { ErrorCode } from '@investor/shared';
 import { AppError } from '../../errors/AppError.js';
 
 /** The backend answered, but not with something usable (invalid output after retry, refusal, 4xx). */

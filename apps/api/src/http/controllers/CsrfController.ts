@@ -1,4 +1,4 @@
-import type { CsrfTokenDto } from '@inverstorm/shared';
+import type { CsrfTokenDto } from '@investor/shared';
 import { Router, type Request, type Response } from 'express';
 import type { CsrfProtection } from '../middleware/CsrfProtection.js';
 import type { Controller } from './Controller.js';

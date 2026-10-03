@@ -15,9 +15,10 @@ This README covers what exists so far: the monorepo, the Express API foundation 
 ```bash
 pnpm install
 cp .env.example .env
-# generate two different secrets (each must be at least 32 characters)
+# generate the cookie secret (at least 32 characters)
 echo "COOKIE_SECRET=$(openssl rand -base64 48)" >> .env
-echo "CSRF_SECRET=$(openssl rand -base64 48)" >> .env
+# only if you turn CSRF protection on (CSRF_ENABLED=true): a second, different secret
+# echo "CSRF_SECRET=$(openssl rand -base64 48)" >> .env
 pnpm dev                     # API on http://localhost:3001
 curl -i http://localhost:3001/api/health
 ```
@@ -71,22 +72,24 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 
 `config/app.config.json` holds non-secret settings. Environment variables (or `.env`) supply the secrets and can override some values:
 
-| Variable                       | Overrides / purpose                                              |
-| ------------------------------ | ---------------------------------------------------------------- |
-| `COOKIE_SECRET`, `CSRF_SECRET` | **Required.** At least 32 characters each, and they must differ  |
-| `NODE_ENV`                     | `development` (default), `production` or `test`                  |
-| `PORT`                         | `server.port`                                                    |
-| `CORS_ORIGINS`                 | `cors.origins` (a comma-separated list of exact origins; no `*`) |
-| `DATABASE_FILE`                | `database.file` (relative to the repo root, or `:memory:`)       |
-| `LOG_LEVEL`                    | `logging.level`                                                  |
-| `APP_CONFIG_PATH`              | Path to an alternative config file                               |
-| `THINKING_PROVIDER`            | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)        |
-| `DECISION_PROVIDER`            | `llm.decision.provider` (`laya`, `jev` or `fake`)                |
-| `OLLAMA_BASE_URL`              | `llm.thinking.providers.ollama.baseUrl`                          |
-| `LAYA_BASE_URL`                | `llm.decision.providers.laya.baseUrl`                            |
-| `ANTHROPIC_API_KEY`            | Required when the thinking provider is `anthropic`               |
-| `TYPESAFE_API_KEY`             | Required when the decision provider is `jev`                     |
-| `LAYA_API_KEY`                 | Optional; sent as a bearer token if your laya-serve requires one |
+| Variable            | Overrides / purpose                                               |
+| ------------------- | ----------------------------------------------------------------- |
+| `COOKIE_SECRET`     | **Required.** At least 32 characters                              |
+| `CSRF_ENABLED`      | `security.csrf.enabled` (`true` / `false`; `false` by default)    |
+| `CSRF_SECRET`       | Required only when CSRF is enabled; 32+ chars, not the cookie one |
+| `NODE_ENV`          | `development` (default), `production` or `test`                   |
+| `PORT`              | `server.port`                                                     |
+| `CORS_ORIGINS`      | `cors.origins` (a comma-separated list of exact origins; no `*`)  |
+| `DATABASE_FILE`     | `database.file` (relative to the repo root, or `:memory:`)        |
+| `LOG_LEVEL`         | `logging.level`                                                   |
+| `APP_CONFIG_PATH`   | Path to an alternative config file                                |
+| `THINKING_PROVIDER` | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)         |
+| `DECISION_PROVIDER` | `llm.decision.provider` (`laya`, `jev` or `fake`)                 |
+| `OLLAMA_BASE_URL`   | `llm.thinking.providers.ollama.baseUrl`                           |
+| `LAYA_BASE_URL`     | `llm.decision.providers.laya.baseUrl`                             |
+| `ANTHROPIC_API_KEY` | Required when the thinking provider is `anthropic`                |
+| `TYPESAFE_API_KEY`  | Required when the decision provider is `jev`                      |
+| `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one  |
 
 Invalid configuration stops startup with a list of every problem. Secret values are never printed.
 
@@ -148,11 +151,12 @@ Provider failures use the standard error format:
 
 ### Dev playground
 
-When `dev.playground` is `true` (the committed default) and `NODE_ENV` is not `production`, three endpoints let you try the active providers by hand. They still need a session cookie and a CSRF token:
+When `dev.playground` is `true` (the committed default) and `NODE_ENV` is not `production`, three endpoints let you try the active providers by hand. They need the session cookie, plus a CSRF token only when CSRF is enabled:
 
 ```bash
 API=http://localhost:3001
-TOKEN=$(curl -s -c jar -b jar $API/api/csrf-token | node -pe 'JSON.parse(require("fs").readFileSync(0)).csrfToken')
+# Only when CSRF is enabled; with it off, /api/csrf-token is 404 and TOKEN can stay empty.
+TOKEN=$(curl -s -c jar -b jar $API/api/csrf-token | node -pe 'JSON.parse(require("fs").readFileSync(0)).csrfToken ?? ""')
 post() { curl -s -c jar -b jar -H 'Content-Type: application/json' -H "X-CSRF-Token: $TOKEN" -d "$2" "$API$1"; echo; }
 
 post /api/dev/thinking/text '{"system":"You are a greedy investor.","messages":[{"role":"user","content":"500k for 15%?"}]}'
@@ -167,17 +171,45 @@ post /api/dev/decision '{"state":{"player_offer":{"investment":500000,"equity":1
 
 Without Ollama or laya-serve running, start the API with `THINKING_PROVIDER=fake DECISION_PROVIDER=fake pnpm dev`. Fake providers are refused in production.
 
+## Testing the API with Postman
+
+`postman/` holds a collection and a local environment:
+
+1. In Postman, **Import** `postman/investor-api.postman_collection.json` and `postman/local.postman_environment.json`.
+2. Select the **Investor local** environment. It sets `baseUrl` to `http://localhost:3001` and `allowedOrigin` to `http://localhost:5173`.
+3. Start the API. Without Ollama or laya-serve, use `THINKING_PROVIDER=fake DECISION_PROVIDER=fake pnpm dev`.
+4. Run **Session & CSRF** first, or run the whole collection in order with the Collection Runner. Postman keeps the player cookie. If the server has CSRF enabled, the token is saved to `{{csrfToken}}` and sent as `X-CSRF-Token`. If it's disabled (the default), _Get CSRF token_ answers 404, no token is sent, and the two CSRF checks are reported as skipped.
+
+The collection's folders:
+
+| Folder          | What it does                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| System          | Health check                                                                                              |
+| Session & CSRF  | Session and CSRF token                                                                                    |
+| Playground      | Thinking text, thinking JSON, and the decision endpoint with the tutor's question set                     |
+| Security checks | Missing or forged CSRF token, form body, malformed JSON, validation errors, 404, allowed and blocked CORS |
+
+Every response is also checked for the security headers and, on errors, for the error envelope.
+
+With fake providers, _Thinking: JSON_ fails with 502 by design, because the fake has no scripted JSON. Playground requests count against the mutation rate limit of 60 per 15 minutes. With CSRF enabled, run _Get CSRF token_ again after clearing cookies, because the token is bound to the player cookie.
+
+To run the collection from the terminal with [Newman](https://www.npmjs.com/package/newman):
+
+```bash
+npx newman run postman/investor-api.postman_collection.json -e postman/local.postman_environment.json
+```
+
 ## Security
 
-| Concern         | What the API does                                                                                                                                                                              |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Headers         | `helmet`, set up for an API: `default-src 'none'`, `frame-ancestors 'none'`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`. HSTS is sent in production only, and `X-Powered-By` is removed |
-| CORS            | Exact-match allowlist from config, with credentials. Other origins get no CORS headers, and their preflights end before any session work                                                       |
-| Identity        | Anonymous player ID in a signed, `HttpOnly`, `SameSite=Lax` cookie (`__Host-` prefix and `Secure` in production). A tampered or unknown cookie gets a new player                               |
-| CSRF            | Signed double-submit token (`csrf-csrf`), HMAC-bound to the player ID. Required on POST/PUT/PATCH/DELETE                                                                                       |
-| Input           | Only `application/json` bodies on POST/PUT/PATCH, a 100 KB body limit, and strict zod validation that rejects unknown fields                                                                   |
-| Abuse           | Per-IP rate limits: a global limit, plus a stricter one for mutating requests. `X-Forwarded-For` is trusted only when `server.trustProxy` is configured                                        |
-| Errors and logs | No stack traces or internal messages in production responses. Cookies, authorization and CSRF headers are redacted from logs                                                                   |
+| Concern         | What the API does                                                                                                                                                                                                                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Headers         | `helmet`, set up for an API: `default-src 'none'`, `frame-ancestors 'none'`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`. HSTS is sent in production only, and `X-Powered-By` is removed                                                                                                       |
+| CORS            | Exact-match allowlist from config, with credentials. Other origins get no CORS headers, and their preflights end before any session work                                                                                                                                                             |
+| Identity        | Anonymous player ID in a signed, `HttpOnly`, `SameSite=Lax` cookie (`__Host-` prefix and `Secure` in production). A tampered or unknown cookie gets a new player                                                                                                                                     |
+| CSRF            | **Off by default** (`security.csrf.enabled` / `CSRF_ENABLED`). When on: a signed double-submit token (`csrf-csrf`), HMAC-bound to the player ID, required on POST/PUT/PATCH/DELETE. When off, cross-site writes are still blocked by `SameSite=Lax` cookies, JSON-only bodies and the CORS allowlist |
+| Input           | Only `application/json` bodies on POST/PUT/PATCH, a 100 KB body limit, and strict zod validation that rejects unknown fields                                                                                                                                                                         |
+| Abuse           | Per-IP rate limits: a global limit, plus a stricter one for mutating requests. `X-Forwarded-For` is trusted only when `server.trustProxy` is configured                                                                                                                                              |
+| Errors and logs | No stack traces or internal messages in production responses. Cookies, authorization and CSRF headers are redacted from logs                                                                                                                                                                         |
 
 ### Contract for the web client
 
@@ -186,7 +218,8 @@ Without Ollama or laya-serve running, start the API with `THINKING_PROVIDER=fake
 const api = (path: string, init: RequestInit = {}) =>
   fetch(`${API_URL}${path}`, { credentials: 'include', ...init });
 
-// 2. Fetch a CSRF token once (and again after a 403 CSRF_INVALID).
+// 2. Only when CSRF is enabled on the server: fetch a token once (and again after a 403 CSRF_INVALID).
+//    With CSRF disabled, /api/csrf-token is 404 and the header can be omitted.
 const { csrfToken } = await (await api('/api/csrf-token')).json();
 
 // 3. Send it with every mutating request.
@@ -201,9 +234,9 @@ Clearing cookies starts a new anonymous player. This is by design, since the gam
 
 ## The `development` export condition
 
-`@inverstorm/shared` declares a custom `development` export that points to its TypeScript sources:
+`@investor/shared` declares a custom `development` export that points to its TypeScript sources:
 
 - `tsx` (`pnpm dev`) and Vitest run with that condition, so changes to `shared` take effect without a build.
 - `pnpm build` and `pnpm start` resolve the compiled `dist/` instead.
 
-If you add a new tool that imports `@inverstorm/shared`, enable that condition in it too.
+If you add a new tool that imports `@investor/shared`, enable that condition in it too.

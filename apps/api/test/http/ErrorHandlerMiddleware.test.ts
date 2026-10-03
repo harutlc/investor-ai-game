@@ -1,4 +1,4 @@
-import { ApiErrorSchema } from '@inverstorm/shared';
+import { ApiErrorSchema } from '@investor/shared';
 import { Router } from 'express';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';

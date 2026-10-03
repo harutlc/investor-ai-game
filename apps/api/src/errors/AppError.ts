@@ -1,4 +1,4 @@
-import type { ErrorCode } from '@inverstorm/shared';
+import type { ErrorCode } from '@investor/shared';
 
 /** Base class for expected errors; the error handler maps it to the API error envelope. */
 export class AppError extends Error {

@@ -22,7 +22,8 @@ export interface ApiServerDeps {
   config: AppConfig;
   logger: Logger;
   playerSession: PlayerSessionMiddleware;
-  csrf: CsrfProtection;
+  /** Omitted when `security.csrf.enabled` is false: no token is required on any request. */
+  csrf?: CsrfProtection | undefined;
   health: HealthController;
   /** Feature controllers, mounted under `/api` behind session + CSRF. */
   controllers: Controller[];
@@ -69,7 +70,7 @@ export class ApiServer {
     app.use(new JsonContentTypeGuard().handle);
     app.use(express.json({ limit: config.server.bodyLimit, strict: true }));
     app.use(playerSession.handle);
-    app.use(csrf.handle);
+    if (csrf) app.use(csrf.handle);
     app.use(limiters.mutations());
 
     const api = Router();

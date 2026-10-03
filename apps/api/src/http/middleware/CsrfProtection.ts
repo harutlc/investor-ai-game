@@ -13,9 +13,12 @@ export class CsrfProtection {
   private readonly utilities: ReturnType<typeof doubleCsrf>;
 
   constructor(config: AppConfig) {
+    const secret = config.secrets.csrfSecret;
+    // Config validation requires the secret whenever CSRF is enabled; this guards hand-built configs.
+    if (!secret) throw new Error('CSRF_SECRET is required when security.csrf.enabled is true');
     this.cookieName = config.isProduction ? '__Host-inv.csrf' : 'inv.csrf';
     this.utilities = doubleCsrf({
-      getSecret: () => config.secrets.csrfSecret,
+      getSecret: () => secret,
       getSessionIdentifier: (req) => req.player?.id ?? '',
       cookieName: this.cookieName,
       cookieOptions: { httpOnly: true, sameSite: 'lax', path: '/', secure: config.isProduction },

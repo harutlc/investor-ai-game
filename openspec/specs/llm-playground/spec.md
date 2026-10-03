@@ -7,7 +7,7 @@ Gives developers HTTP endpoints for trying the active thinking and decision prov
 ## Requirements
 
 ### Requirement: Availability
-The playground endpoints SHALL be mounted under `/api/dev` only when `dev.playground` is `true` in the configuration and `NODE_ENV` is not `production`. Otherwise every `/api/dev/*` path MUST respond 404 `NOT_FOUND`. The endpoints SHALL use the same session, CSRF, content-type, body-size and rate-limit protections as every other mutating endpoint.
+The playground endpoints SHALL be mounted under `/api/dev` only when `dev.playground` is `true` in the configuration and `NODE_ENV` is not `production`. Otherwise every `/api/dev/*` path MUST respond 404 `NOT_FOUND`. The endpoints SHALL use the same session, CSRF (when enabled), content-type, body-size and rate-limit protections as every other mutating endpoint.
 
 #### Scenario: Disabled in production
 - **WHEN** `NODE_ENV=production` and `dev.playground` is `true`
@@ -18,7 +18,7 @@ The playground endpoints SHALL be mounted under `/api/dev` only when `dev.playgr
 - **THEN** `POST /api/dev/decision` responds 404 `NOT_FOUND`
 
 #### Scenario: CSRF still required
-- **WHEN** the playground is enabled and a client posts to `/api/dev/thinking/text` without a CSRF token
+- **WHEN** the playground and CSRF protection are enabled and a client posts to `/api/dev/thinking/text` without a CSRF token
 - **THEN** the response is 403 `CSRF_INVALID`
 
 ### Requirement: Thinking text endpoint

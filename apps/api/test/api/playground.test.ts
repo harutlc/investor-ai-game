@@ -2,7 +2,7 @@ import {
   DecisionResultDtoSchema,
   PlaygroundJsonResponseSchema,
   PlaygroundTextResponseSchema,
-} from '@inverstorm/shared';
+} from '@investor/shared';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { FakeDecisionProvider } from '../../src/llm/decision/FakeDecisionProvider.js';

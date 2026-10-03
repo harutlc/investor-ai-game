@@ -40,12 +40,19 @@ const commaList = (raw: string) =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+/** "true"/"false" become booleans; anything else is left for the schema to reject. */
+const booleanFlag = (raw: string): unknown => {
+  const value = raw.trim().toLowerCase();
+  return value === 'true' ? true : value === 'false' ? false : raw;
+};
+
 /** Config values an environment variable may override (the env value wins). */
 const ENV_OVERRIDES: readonly EnvOverride[] = [
   { path: 'server.port', env: 'PORT' },
   { path: 'cors.origins', env: 'CORS_ORIGINS', parse: commaList },
   { path: 'database.file', env: 'DATABASE_FILE' },
   { path: 'logging.level', env: 'LOG_LEVEL' },
+  { path: 'security.csrf.enabled', env: 'CSRF_ENABLED', parse: booleanFlag },
   { path: 'llm.thinking.provider', env: 'THINKING_PROVIDER' },
   { path: 'llm.decision.provider', env: 'DECISION_PROVIDER' },
   { path: 'llm.thinking.providers.ollama.baseUrl', env: 'OLLAMA_BASE_URL' },

@@ -8,6 +8,8 @@ type Overrides = {
   /** Arbitrary edits (e.g. the `llm` section) applied before freezing. */
   mutate?: (config: MutableConfig) => void;
   playground?: boolean;
+  /** CSRF protection; on by default in tests so the security behavior stays covered. */
+  csrf?: boolean;
   server?: Partial<MutableConfig['server']>;
   cors?: Partial<MutableConfig['cors']>;
   rateLimit?: Partial<MutableConfig['security']['rateLimit']>;
@@ -31,6 +33,7 @@ export function testConfig(overrides: Overrides = {}): AppConfig {
     security: {
       rateLimit: { windowMs: 60_000, max: 1000, mutationMax: 1000, ...overrides.rateLimit },
       sessionMaxAgeDays: overrides.sessionMaxAgeDays ?? 30,
+      csrf: { enabled: overrides.csrf ?? true },
     },
     database: { file: ':memory:' },
     logging: { level: overrides.logLevel ?? 'silent' },

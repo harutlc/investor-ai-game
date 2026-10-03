@@ -34,7 +34,7 @@ function loadError(env: NodeJS.ProcessEnv = {}): ConfigError {
 }
 
 beforeEach(() => {
-  rootDir = mkdtempSync(path.join(tmpdir(), 'inverstorm-config-'));
+  rootDir = mkdtempSync(path.join(tmpdir(), 'investor-config-'));
   mkdirSync(path.join(rootDir, 'config'));
   writeConfig();
 });
@@ -112,8 +112,11 @@ describe('ConfigLoader', () => {
     writeConfig((config) => {
       config.server!.port = 'abc';
     });
-    const error = loadError({});
-    expect(error.issues.length).toBeGreaterThanOrEqual(3);
+    // Conditional requirements (CSRF_SECRET, provider keys) are checked once the rest is valid.
+    const error = loadError({ CSRF_ENABLED: 'true' });
+    expect(error.issues).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^server\.port /), 'COOKIE_SECRET is required']),
+    );
   });
 
   it.each(['*', 'http://localhost:5173/', 'not a url'])('rejects CORS origin %s', (origin) => {
@@ -145,6 +148,27 @@ describe('ConfigLoader', () => {
       (config.cors.origins as string[]).push('https://x.example');
     }).toThrow(TypeError);
     expect(config.server.port).toBe(3001);
+  });
+});
+
+describe('ConfigLoader: CSRF flag', () => {
+  it('is disabled in the committed config and then needs no CSRF_SECRET', () => {
+    const config = new ConfigLoader({ rootDir, env: { COOKIE_SECRET } }).load();
+    expect(config.security.csrf.enabled).toBe(false);
+    expect(config.secrets.csrfSecret).toBeUndefined();
+  });
+
+  it('is enabled by CSRF_ENABLED=true and then requires CSRF_SECRET', () => {
+    expect(load({ CSRF_ENABLED: 'true' }).security.csrf.enabled).toBe(true);
+    expect(loadError({ COOKIE_SECRET, CSRF_ENABLED: 'true' }).issues).toContain(
+      'CSRF_SECRET is required when security.csrf.enabled is true',
+    );
+  });
+
+  it('rejects a non-boolean CSRF_ENABLED', () => {
+    expect(loadError({ COOKIE_SECRET, CSRF_SECRET, CSRF_ENABLED: 'yes' }).message).toContain(
+      'security.csrf.enabled (from CSRF_ENABLED) must be true or false',
+    );
   });
 });
 

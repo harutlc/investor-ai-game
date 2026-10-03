@@ -5,7 +5,7 @@ import {
   type DecisionState,
   type NoulAnswer,
   type ScoreAnswer,
-} from '@inverstorm/shared';
+} from '@investor/shared';
 import type { DECISION_PROVIDERS } from '../../config/AppConfigSchema.js';
 import { ValidationError } from '../../errors/ValidationError.js';
 

@@ -68,8 +68,10 @@ export class Container {
     this.playerService = new PlayerService(this.playerRepository, overrides.clock);
     this.healthService = new HealthService(this.database, this.providerHealth);
 
-    const csrf = new CsrfProtection(config);
-    const controllers: Controller[] = [new SessionController(), new CsrfController(csrf)];
+    const csrf = config.security.csrf.enabled ? new CsrfProtection(config) : undefined;
+    const controllers: Controller[] = [new SessionController()];
+    // Without CSRF there is no token to hand out, so GET /api/csrf-token is simply not mounted (404).
+    if (csrf) controllers.push(new CsrfController(csrf));
     // Hard production gate: the playground spends real provider money and must never be exposed there.
     if (config.dev.playground && !config.isProduction) {
       controllers.push(new PlaygroundController(this.thinkingProvider, this.decisionProvider));

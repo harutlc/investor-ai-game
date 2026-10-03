@@ -1,0 +1,775 @@
+{
+  "info": {
+    "_postman_id": "83ccf853-e454-558c-becb-ba0533a6070e",
+    "name": "Investor API",
+    "description": "Investor Negotiation Game API (local development).\n\n1. Import this collection and `local.postman_environment.json`, then select the **Investor local** environment.\n2. Start the API (`pnpm dev`, or `THINKING_PROVIDER=fake DECISION_PROVIDER=fake pnpm dev` without Ollama/laya-serve).\n3. Run **Session & CSRF** first (or run the whole collection in order with the Collection Runner).\n\nEvery response is checked for the security headers and, for errors, the `{ error: { code, message, requestId } }` envelope.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Runs after every request in the collection.",
+          "pm.test('security headers', () => {",
+          "  pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.eql('nosniff');",
+          "  pm.expect(pm.response.headers.has('X-Powered-By')).to.be.false;",
+          "  pm.expect(pm.response.headers.get('X-Request-Id')).to.match(/^[0-9a-f-]{36}$/);",
+          "});",
+          "if (pm.response.code >= 400) {",
+          "  pm.test('error envelope', () => {",
+          "    const { error } = pm.response.json();",
+          "    pm.expect(error.code).to.match(/^[A-Z_]+$/);",
+          "    pm.expect(error.message).to.be.a('string');",
+          "    pm.expect(error.requestId).to.eql(pm.response.headers.get('X-Request-Id'));",
+          "    pm.expect(pm.response.text()).to.not.include('    at ');",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3001",
+      "description": "Fallback when no environment is selected"
+    },
+    {
+      "key": "allowedOrigin",
+      "value": "http://localhost:5173"
+    },
+    {
+      "key": "csrfToken",
+      "value": "",
+      "description": "Set by \"Get CSRF token\" (empty when CSRF is disabled)"
+    },
+    {
+      "key": "csrfEnabled",
+      "value": "",
+      "description": "Set by \"Get CSRF token\": \"true\" or \"false\""
+    },
+    {
+      "key": "playerId",
+      "value": "",
+      "description": "Set by \"Get session\""
+    }
+  ],
+  "item": [
+    {
+      "id": "f4c57b70-6766-5e55-ac50-45d206f886c7",
+      "name": "System",
+      "description": "Liveness and provider reachability. No session or CSRF token needed.",
+      "item": [
+        {
+          "id": "d0cdce48-111f-5527-a388-500cb0d07180",
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('status ok', () => pm.expect(body.status).to.eql('ok'));",
+                  "pm.test('checks database/thinking/decision', () => {",
+                  "  pm.expect(body.checks).to.have.all.keys('database', 'thinking', 'decision');",
+                  "  Object.values(body.checks).forEach((v) => pm.expect(v).to.be.oneOf(['ok', 'error']));",
+                  "});",
+                  "pm.test('no provider identity leaked', () => {",
+                  "  pm.expect(pm.response.text()).to.not.match(/ollama|anthropic|laya|jev|llama|claude|https?:/i);",
+                  "});",
+                  "pm.test('no session cookie issued', () => pm.expect(pm.response.headers.has('Set-Cookie')).to.be.false);",
+                  "if (body.checks.thinking === 'error' || body.checks.decision === 'error') {",
+                  "  console.warn('A provider is unreachable: playground requests to it will fail.', body.checks);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            },
+            "description": "Database check decides 200/503. `checks.thinking` / `checks.decision` report the active LLM providers (cached ~30 s) and never change the status code."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "id": "396c2fb6-8d9f-5b40-9b50-4fa626ab6d40",
+      "name": "Session & CSRF",
+      "description": "Run these first. Postman keeps the `inv.pid` player cookie for the host. When the server has CSRF enabled (`security.csrf.enabled` / `CSRF_ENABLED=true`), the token is saved to `csrfToken` and sent as `X-CSRF-Token` on every POST; it is bound to the player cookie, so after clearing cookies run \"Get CSRF token\" again. With CSRF disabled (the default) the token request answers 404 and no token is needed.",
+      "item": [
+        {
+          "id": "9b8d8fc1-777d-5416-beb5-352b9dbae079",
+          "name": "Get session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('playerId is a UUID', () => pm.expect(body.playerId).to.match(/^[0-9a-f-]{36}$/));",
+                  "pm.test('only public fields', () => pm.expect(body).to.have.all.keys('playerId', 'createdAt'));",
+                  "const previous = pm.collectionVariables.get('playerId');",
+                  "if (previous) pm.test('same player as before (cookie kept)', () => pm.expect(body.playerId).to.eql(previous));",
+                  "pm.collectionVariables.set('playerId', body.playerId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/session",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "session"]
+            },
+            "description": "Creates the anonymous player on first call."
+          },
+          "response": []
+        },
+        {
+          "id": "a94df01e-2856-5917-ab4c-9356bde7e2d6",
+          "name": "Get CSRF token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 404) {",
+                  "  pm.collectionVariables.set('csrfEnabled', 'false');",
+                  "  pm.collectionVariables.set('csrfToken', '');",
+                  "  pm.test('CSRF protection is disabled on this server (no token needed)', () => {});",
+                  "} else {",
+                  "  pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "  const { csrfToken } = pm.response.json();",
+                  "  pm.test('token returned', () => pm.expect(csrfToken).to.be.a('string').with.length.above(32));",
+                  "  pm.collectionVariables.set('csrfEnabled', 'true');",
+                  "  pm.collectionVariables.set('csrfToken', csrfToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/csrf-token",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "csrf-token"]
+            },
+            "description": "Returns 404 when `security.csrf.enabled` is false (the committed default): the collection then records `csrfEnabled=false` and skips the CSRF-specific checks."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "id": "dcb8e6ec-3391-5b97-bdef-df80ed2e94da",
+      "name": "Playground",
+      "description": "Dev-only endpoints (`dev.playground: true`, never in production) that call the **active** providers. With fake providers, `thinking/json` answers 502 (the fake has no scripted JSON). Mutations are rate-limited (60 per 15 min by default).",
+      "item": [
+        {
+          "id": "3f77f91d-d0fb-56e5-b21e-fea43bf85e86",
+          "name": "Thinking: text",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 503 || pm.response.code === 502) {",
+                  "  console.warn('Provider error ' + pm.response.json().error.code +",
+                  "    ': is the active provider running? Check GET /api/health and the server log.');",
+                  "}",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('text reply', () => pm.expect(body.text).to.be.a('string').and.not.empty);",
+                  "pm.test('provider metadata', () => {",
+                  "  pm.expect(body.provider).to.be.oneOf(['ollama', 'anthropic', 'fake']);",
+                  "  pm.expect(body.model).to.be.a('string');",
+                  "  pm.expect(body.latencyMs).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/thinking/text",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "thinking", "text"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"system\": \"You are a greedy, impatient startup investor. Reply in one or two short sentences.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"I want €500k for 15% of my EV charging startup.\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "334a5415-20a5-57cb-8f19-2ab398ba230c",
+          "name": "Thinking: JSON (reply options)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 503 || pm.response.code === 502) {",
+                  "  console.warn('Provider error ' + pm.response.json().error.code +",
+                  "    ': is the active provider running? Check GET /api/health and the server log.');",
+                  "}",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "// `data` is a reserved sandbox global (iteration data), hence `generated`.",
+                  "const generated = pm.response.json().data;",
+                  "pm.test('data matches the posted schema', () => {",
+                  "  pm.expect(generated.options).to.be.an('array').that.is.not.empty;",
+                  "  generated.options.forEach((o) => pm.expect(o).to.be.a('string'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/thinking/json",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "thinking", "json"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"system\": \"You generate reply options for a founder negotiating with an investor who offered €500k for 30%. Options must be short and distinct.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Give exactly 3 reply options.\"\n    }\n  ],\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"options\": {\n        \"type\": \"array\",\n        \"items\": {\n          \"type\": \"string\"\n        }\n      }\n    },\n    \"required\": [\n      \"options\"\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "e7ed16a0-e012-5577-bed2-c2fdd672c16b",
+          "name": "Decision: tutor questions",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 503 || pm.response.code === 502) {",
+                  "  console.warn('Provider error ' + pm.response.json().error.code +",
+                  "    ': is the active provider running? Check GET /api/health and the server log.');",
+                  "}",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const { answers, provider, usage } = pm.response.json();",
+                  "pm.test('provider metadata', () => {",
+                  "  pm.expect(provider).to.be.oneOf(['jev', 'laya', 'fake']);",
+                  "  pm.expect(usage.inputTokens).to.be.a('number');",
+                  "});",
+                  "pm.test('reaction is one of the labels', () => {",
+                  "  pm.expect(answers.reaction.type).to.eql('choice');",
+                  "  pm.expect(answers.reaction.value).to.be.oneOf(['accept', 'counter', 'reject', 'walk_away']);",
+                  "  pm.expect(answers.reaction.confidence).to.be.within(0, 1);",
+                  "});",
+                  "pm.test('good_deal is a probability', () => pm.expect(answers.good_deal.probability).to.be.within(0, 1));",
+                  "pm.test('accept is a score within the 5 levels', () => pm.expect(answers.accept.value).to.be.within(0, 4));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/decision",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "decision"]
+            },
+            "description": "The tutor's example: score `accept`, choice `reaction`, noul `good_deal` over one state.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state\": {\n    \"player_offer\": {\n      \"investment\": 500000,\n      \"equity\": 15\n    },\n    \"investor\": {\n      \"personality\": \"greedy: pushes for maximum equity, haggles long\",\n      \"budget\": 700000,\n      \"max_equity\": 30,\n      \"interest\": 0.72,\n      \"patience\": 3\n    },\n    \"history\": [\n      \"Investor offered €500k for 30%\",\n      \"Player countered €500k for 15%\"\n    ]\n  },\n  \"questions\": {\n    \"accept\": {\n      \"type\": \"score\",\n      \"instructions\": \"How likely is the investor to accept the player's offer?\",\n      \"criteria\": [\n        \"Definitely reject\",\n        \"Probably reject\",\n        \"Uncertain\",\n        \"Probably accept\",\n        \"Definitely accept\"\n      ]\n    },\n    \"reaction\": {\n      \"type\": \"choice\",\n      \"instructions\": \"How should the investor react?\",\n      \"criteria\": {\n        \"accept\": \"Accept the offer\",\n        \"counter\": \"Make a counter-offer\",\n        \"reject\": \"Reject the offer\",\n        \"walk_away\": \"End the negotiation\"\n      }\n    },\n    \"good_deal\": {\n      \"type\": \"noul\",\n      \"instructions\": \"The player's offer is attractive enough for the investor\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "id": "dd35a69e-7353-5ee3-8009-ebb7dfa4ee8a",
+      "name": "Security checks",
+      "description": "Negative tests: each request is expected to be rejected. They need \"Session & CSRF\" to have run where noted.",
+      "item": [
+        {
+          "id": "19b05768-77f7-577d-bc3d-d95b4e2f943f",
+          "name": "POST without CSRF token → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') === 'false') {",
+                  "  pm.test.skip('CSRF protection is disabled on this server', () => {});",
+                  "} else {",
+                  "  pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('error code CSRF_INVALID', () => pm.expect(pm.response.json().error.code).to.eql('CSRF_INVALID'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/decision",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "decision"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state\": \"x\",\n  \"questions\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "8e5eb15d-42b1-57f1-a062-51b993d109f8",
+          "name": "POST with a forged CSRF token → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') === 'false') {",
+                  "  pm.test.skip('CSRF protection is disabled on this server', () => {});",
+                  "} else {",
+                  "  pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "  pm.test('error code CSRF_INVALID', () => pm.expect(pm.response.json().error.code).to.eql('CSRF_INVALID'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "forged.token"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/decision",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "decision"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state\": \"x\",\n  \"questions\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "d80d2b16-cf1a-5cf3-9b38-383cb0dc2bcc",
+          "name": "Form-encoded body → 415",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 415', () => pm.response.to.have.status(415));",
+                  "pm.test('error code UNSUPPORTED_MEDIA_TYPE', () => pm.expect(pm.response.json().error.code).to.eql('UNSUPPORTED_MEDIA_TYPE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/decision",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "decision"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "state=x"
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "25e89605-40b0-524a-8584-98612f7773cd",
+          "name": "Malformed JSON → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code INVALID_JSON', () => pm.expect(pm.response.json().error.code).to.eql('INVALID_JSON'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/decision",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "decision"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"state\": "
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "81faaade-4205-5917-a747-01ddd464c66e",
+          "name": "Invalid playground body → 400",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));",
+                  "const paths = pm.response.json().error.details.map((d) => d.path);",
+                  "pm.test('details name the fields', () => pm.expect(paths).to.include.members(['body.messages', 'body.unexpected']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/thinking/text",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "thinking", "text"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [],\n  \"unexpected\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "65ebec11-028b-5f7d-b916-8c895dcaeee7",
+          "name": "Choice with one option → 400",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('csrfEnabled') !== 'false' && !pm.collectionVariables.get('csrfToken')) {",
+                  "  console.warn('csrfToken is empty: run \"Session & CSRF / Get CSRF token\" first.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-CSRF-Token",
+                "value": "{{csrfToken}}",
+                "description": "From \"Get CSRF token\""
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/dev/decision",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "dev", "decision"]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state\": \"x\",\n  \"questions\": {\n    \"q\": {\n      \"type\": \"choice\",\n      \"instructions\": \"pick\",\n      \"criteria\": {\n        \"only\": null\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "id": "6db56f1f-b428-5cd4-960f-3cbf5c9ea553",
+          "name": "Unknown route → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error code NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/does-not-exist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "does-not-exist"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "id": "a518a8fb-f278-55e0-b54d-c756a4b2cc11",
+          "name": "CORS: allowed origin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('origin echoed with credentials', () => {",
+                  "  pm.expect(pm.response.headers.get('Access-Control-Allow-Origin')).to.eql(pm.environment.get('allowedOrigin') || pm.collectionVariables.get('allowedOrigin'));",
+                  "  pm.expect(pm.response.headers.get('Access-Control-Allow-Credentials')).to.eql('true');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{allowedOrigin}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "id": "a2424089-2cd2-500c-b4ef-1dc74f2971ec",
+          "name": "CORS: disallowed origin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('no CORS headers', () => pm.expect(pm.response.headers.has('Access-Control-Allow-Origin')).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "https://evil.example"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

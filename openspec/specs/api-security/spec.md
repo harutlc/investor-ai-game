@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the security controls that apply to every API endpoint: security headers, cross-origin rules, CSRF protection for cookie-authenticated mutations, abuse limits and input-size limits. Future endpoints inherit them by default.
+Defines the security controls that apply to every API endpoint: security headers, cross-origin rules, optional CSRF protection for cookie-authenticated mutations, abuse limits and input-size limits. Future endpoints inherit them by default.
 
 ## Requirements
 
@@ -40,29 +40,47 @@ The system SHALL allow cross-origin requests only from the configured list of ex
 - **THEN** startup fails with a configuration error
 
 ### Requirement: CSRF protection
-The system SHALL protect every state-changing request (POST, PUT, PATCH, DELETE) with a CSRF token that is bound to the caller's player session, using the signed double-submit cookie pattern. `GET /api/csrf-token` MUST return `{ "csrfToken": string }` and set the matching CSRF cookie. A state-changing request MUST carry the token in the `X-CSRF-Token` header. A missing, invalid or session-mismatched token MUST be rejected with 403 and `error.code = "CSRF_INVALID"`. GET, HEAD and OPTIONS requests MUST NOT require a token, and therefore MUST NOT change state.
+CSRF protection SHALL be controlled by the `security.csrf.enabled` setting, which the `CSRF_ENABLED` environment variable (`true` / `false`) overrides. It is disabled in the committed configuration.
+
+When enabled, the system SHALL protect every state-changing request (POST, PUT, PATCH, DELETE) with a CSRF token that is bound to the caller's player session, using the signed double-submit cookie pattern:
+- `GET /api/csrf-token` MUST return `{ "csrfToken": string }` and set the matching CSRF cookie.
+- A state-changing request MUST carry the token in the `X-CSRF-Token` header.
+- A missing, invalid or session-mismatched token MUST be rejected with 403 and `error.code = "CSRF_INVALID"`.
+- `CSRF_SECRET` MUST be set, or startup fails.
+
+When disabled, state-changing requests MUST NOT require a token, no CSRF cookie is issued, `GET /api/csrf-token` MUST respond 404 `NOT_FOUND`, and `CSRF_SECRET` is not required. Cross-site writes then remain blocked by `SameSite=Lax` cookies, JSON-only request bodies and the CORS allowlist.
+
+In both modes, GET, HEAD and OPTIONS requests MUST NOT require a token, and therefore MUST NOT change state.
 
 #### Scenario: Valid token
-- **WHEN** a client fetches a token from `GET /api/csrf-token` and sends a POST with that token in `X-CSRF-Token` and the issued cookies
+- **WHEN** CSRF protection is enabled and a client fetches a token from `GET /api/csrf-token` and sends a POST with that token in `X-CSRF-Token` and the issued cookies
 - **THEN** the request passes CSRF validation
 
 #### Scenario: Missing token
-- **WHEN** a client sends a POST with the session cookies but no `X-CSRF-Token` header
+- **WHEN** CSRF protection is enabled and a client sends a POST with the session cookies but no `X-CSRF-Token` header
 - **THEN** the response is 403 with `error.code = "CSRF_INVALID"`
 
 #### Scenario: Token from another session
-- **WHEN** a client sends a POST with a token issued to a different player session
+- **WHEN** CSRF protection is enabled and a client sends a POST with a token issued to a different player session
 - **THEN** the response is 403 with `error.code = "CSRF_INVALID"`
 
 #### Scenario: Safe methods unaffected
 - **WHEN** a client calls `GET /api/health` without a token
 - **THEN** the request succeeds
 
+#### Scenario: Disabled
+- **WHEN** CSRF protection is disabled and a client sends a JSON POST with only the session cookie
+- **THEN** the request is not rejected for CSRF, and `GET /api/csrf-token` responds 404 `NOT_FOUND`
+
+#### Scenario: Secret required only when enabled
+- **WHEN** `CSRF_ENABLED=true` and `CSRF_SECRET` is unset
+- **THEN** startup fails with a message naming `CSRF_SECRET`; with CSRF disabled, startup succeeds without it
+
 ### Requirement: Hardened cookies
-The system SHALL issue every cookie it sets with `HttpOnly`, `SameSite=Lax` and `Path=/`, and with `Secure` when `NODE_ENV=production`. Cookies holding identity or CSRF secrets MUST be signed or HMAC-bound with server-side secrets. In production, the CSRF cookie MUST use the `__Host-` name prefix.
+The system SHALL issue every cookie it sets with `HttpOnly`, `SameSite=Lax` and `Path=/`, and with `Secure` when `NODE_ENV=production`. Cookies holding identity or CSRF secrets MUST be signed or HMAC-bound with server-side secrets. In production, the CSRF cookie (issued only when CSRF protection is enabled) MUST use the `__Host-` name prefix.
 
 #### Scenario: Production cookie flags
-- **WHEN** the API issues the CSRF cookie with `NODE_ENV=production`
+- **WHEN** CSRF protection is enabled and the API issues the CSRF cookie with `NODE_ENV=production`
 - **THEN** the `Set-Cookie` header uses the `__Host-` prefix and includes `HttpOnly`, `Secure`, `SameSite=Lax` and `Path=/`
 
 ### Requirement: JSON-only mutating requests

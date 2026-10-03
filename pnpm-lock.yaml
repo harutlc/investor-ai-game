@@ -38,7 +38,7 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.131.0
         version: 0.131.0(zod@4.6.5)
-      '@inverstorm/shared':
+      '@investor/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@typesafe-ai/sdk':

@@ -1,5 +1,5 @@
 {
-  "name": "@inverstorm/api",
+  "name": "@investor/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
-    "@inverstorm/shared": "workspace:*",
+    "@investor/shared": "workspace:*",
     "@typesafe-ai/sdk": "^0.6.0",
     "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",

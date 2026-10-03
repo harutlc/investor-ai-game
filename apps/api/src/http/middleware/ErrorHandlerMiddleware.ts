@@ -1,4 +1,4 @@
-import { ErrorCode, type ApiError } from '@inverstorm/shared';
+import { ErrorCode, type ApiError } from '@investor/shared';
 import type { NextFunction, Request, Response } from 'express';
 import type { Logger } from 'pino';
 import { AppError } from '../../errors/AppError.js';

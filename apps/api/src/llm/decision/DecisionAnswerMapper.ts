@@ -1,4 +1,4 @@
-import type { DecisionAnswer } from '@inverstorm/shared';
+import type { DecisionAnswer } from '@investor/shared';
 import { z } from 'zod';
 import { ProviderBadResponseError } from '../errors/ProviderBadResponseError.js';
 import type { QuestionSet } from './DecisionProvider.js';
