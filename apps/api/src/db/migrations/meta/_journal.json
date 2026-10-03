@@ -15,6 +15,13 @@
       "when": 1791034151228,
       "tag": "0001_create_game_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791049579701,
+      "tag": "0002_add_player_options",
+      "breakpoints": true
     }
   ]
 }

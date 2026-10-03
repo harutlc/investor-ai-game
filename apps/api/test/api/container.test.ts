@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { InvestorBrain } from '../../src/brain/InvestorBrain.js';
+import { GameEngine } from '../../src/game/GameEngine.js';
+import { GameSessionService } from '../../src/game/GameSessionService.js';
 import { NegotiationPolicy } from '../../src/game/NegotiationPolicy.js';
 import { InvestorVoice } from '../../src/voice/InvestorVoice.js';
 import { voiceContext } from '../support/voiceFixtures.js';
@@ -140,5 +142,11 @@ describe('Container game wiring', () => {
       'Accept €500k for 30%',
       'Walk away',
     ]);
+  });
+
+  it('builds the game engine and its read side', () => {
+    const { container } = createTestApp();
+    expect(container.gameEngine).toBeInstanceOf(GameEngine);
+    expect(container.gameSessionService).toBeInstanceOf(GameSessionService);
   });
 });

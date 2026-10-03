@@ -28,6 +28,14 @@ export class Database {
     migrate(this.db, { migrationsFolder });
   }
 
+  /**
+   * Runs `fn` in one transaction: committed when it returns, rolled back when it throws. `fn` must be
+   * synchronous; every repository shares this connection, so their writes inside `fn` are part of it.
+   */
+  transaction<T>(fn: () => T): T {
+    return this.sqlite.transaction(fn)();
+  }
+
   /** Throws if the database cannot answer a trivial query. */
   ping(): void {
     this.sqlite.prepare('select 1').get();

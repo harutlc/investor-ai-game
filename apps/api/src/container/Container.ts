@@ -6,11 +6,16 @@ import { OfferCandidateExtractor } from '../brain/OfferCandidateExtractor.js';
 import { QuestionSetRegistry } from '../brain/QuestionSetRegistry.js';
 import type { AppConfig } from '../config/AppConfig.js';
 import { Database } from '../db/Database.js';
+import { GameEngine } from '../game/GameEngine.js';
+import { GameSessionMapper } from '../game/GameSessionMapper.js';
+import { GameSessionService } from '../game/GameSessionService.js';
 import { InvestorStateUpdater } from '../game/InvestorStateUpdater.js';
 import { MeterHintMapper } from '../game/MeterHintMapper.js';
+import { MoveResolver } from '../game/MoveResolver.js';
 import { NegotiationPolicy } from '../game/NegotiationPolicy.js';
 import { OpeningOfferCalculator } from '../game/OpeningOfferCalculator.js';
 import { TurnLimiter } from '../game/TurnLimiter.js';
+import { TurnLock } from '../game/TurnLock.js';
 import { ApiServer } from '../http/ApiServer.js';
 import type { Controller } from '../http/controllers/Controller.js';
 import { CsrfController } from '../http/controllers/CsrfController.js';
@@ -60,7 +65,8 @@ export interface ContainerOverrides {
 
 /**
  * Manual DI: config → logger → database → repositories → LLM providers (+ confidence gate, decision logger)
- * → investor brain → negotiation policy → investor voice → services → middleware/controllers → server.
+ * → investor brain → negotiation policy → investor voice → game engine → services → middleware/controllers
+ * → server.
  */
 export class Container {
   readonly logger: Logger;
@@ -89,6 +95,13 @@ export class Container {
   readonly openingOfferCalculator: OpeningOfferCalculator;
   /** The voice: lines and player options from the thinking model, number-checked by code. */
   readonly investorVoice: InvestorVoice;
+  readonly gameSessionMapper: GameSessionMapper;
+  /** Read side of games: the public view and the decision insights. */
+  readonly gameSessionService: GameSessionService;
+  readonly moveResolver: MoveResolver;
+  readonly turnLock: TurnLock;
+  /** Runs games: startGame() and playTurn(). */
+  readonly gameEngine: GameEngine;
   readonly playerService: PlayerService;
   readonly healthService: HealthService;
   readonly server: ApiServer;
@@ -158,6 +171,40 @@ export class Container {
       new PlayerOptionsGenerator(this.thinkingProvider, prompts, numbersInPlay, checker),
       this.logger,
     );
+
+    this.gameSessionMapper = new GameSessionMapper(this.meterHintMapper, config.game.maxTurns);
+    this.gameSessionService = new GameSessionService(
+      this.gameSessionRepository,
+      this.messageRepository,
+      this.offerRepository,
+      this.decisionLogRepository,
+      this.personaCatalog,
+      this.gameSessionMapper,
+    );
+    this.moveResolver = new MoveResolver(
+      this.investorBrain,
+      this.negotiationStateBuilder,
+      this.negotiationPolicy,
+    );
+    this.turnLock = new TurnLock();
+    this.gameEngine = new GameEngine({
+      database: this.database,
+      sessions: this.gameSessionRepository,
+      messages: this.messageRepository,
+      offers: this.offerRepository,
+      personas: this.personaCatalog,
+      service: this.gameSessionService,
+      mapper: this.gameSessionMapper,
+      resolver: this.moveResolver,
+      states: this.negotiationStateBuilder,
+      brain: this.investorBrain,
+      policy: this.negotiationPolicy,
+      limiter: this.turnLimiter,
+      opening: this.openingOfferCalculator,
+      voice: this.investorVoice,
+      lock: this.turnLock,
+      ...(overrides.clock ? { clock: overrides.clock } : {}),
+    });
 
     this.playerService = new PlayerService(this.playerRepository, overrides.clock);
     this.healthService = new HealthService(this.database, this.providerHealth);

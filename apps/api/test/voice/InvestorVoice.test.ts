@@ -2,14 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { OfferCandidateExtractor } from '../../src/brain/OfferCandidateExtractor.js';
 import type { InvestorAction } from '../../src/game/InvestorAction.js';
 import { ProviderUnavailableError } from '../../src/llm/errors/ProviderUnavailableError.js';
-import { FakeThinkingProvider } from '../../src/llm/thinking/FakeThinkingProvider.js';
-import type {
-  JsonRequest,
-  JsonResult,
-  TextResult,
-  ThinkingProvider,
-  ThinkingRequest,
-} from '../../src/llm/thinking/ThinkingProvider.js';
+import type { ThinkingProvider } from '../../src/llm/thinking/ThinkingProvider.js';
 import { InvestorDialogueGenerator } from '../../src/voice/InvestorDialogueGenerator.js';
 import { InvestorVoice } from '../../src/voice/InvestorVoice.js';
 import { NumberConsistencyChecker } from '../../src/voice/NumberConsistencyChecker.js';
@@ -17,6 +10,7 @@ import { OpeningGenerator } from '../../src/voice/OpeningGenerator.js';
 import { PlayerOptionsGenerator } from '../../src/voice/PlayerOptionsGenerator.js';
 import { PromptBuilder } from '../../src/voice/PromptBuilder.js';
 import { captureLogger } from '../support/silentLogger.js';
+import { ScriptedThinkingProvider } from '../support/thinkingFixtures.js';
 import { OPENING, lineWriter, numbersInPlay, voiceContext } from '../support/voiceFixtures.js';
 
 const OPTIONS_JSON = JSON.stringify({
@@ -24,37 +18,6 @@ const OPTIONS_JSON = JSON.stringify({
 });
 const counter: InvestorAction = { kind: 'counter', offer: { investment: 550_000, equity: 24 } };
 const context = voiceContext({ playerOffer: { investment: 500_000, equity: 20 } });
-
-/** Text requests get `text`, JSON requests get `json`; each call can be held by `gate`. */
-class SplitProvider implements ThinkingProvider {
-  readonly name = 'fake' as const;
-  readonly model = 'fake';
-  private readonly text = new FakeThinkingProvider();
-  private readonly json = new FakeThinkingProvider();
-
-  constructor(
-    textReplies: (string | Error)[],
-    jsonReplies: (string | Error)[],
-    private readonly gate: () => Promise<void> = () => Promise.resolve(),
-  ) {
-    this.text.enqueue(...textReplies);
-    this.json.enqueue(...jsonReplies);
-  }
-
-  async generateText(request: ThinkingRequest): Promise<TextResult> {
-    await this.gate();
-    return this.text.generateText(request);
-  }
-
-  async generateJson<T>(request: JsonRequest<T>): Promise<JsonResult<T>> {
-    await this.gate();
-    return this.json.generateJson(request);
-  }
-
-  ping(): Promise<void> {
-    return Promise.resolve();
-  }
-}
 
 function voice(provider: ThinkingProvider) {
   const { logger, lines } = captureLogger();
@@ -81,7 +44,7 @@ describe('InvestorVoice', () => {
     let arrived = 0;
     let release!: () => void;
     const both = new Promise<void>((resolve) => (release = resolve));
-    const provider = new SplitProvider(['Fine. €550k for 24%.'], [OPTIONS_JSON], async () => {
+    const provider = new ScriptedThinkingProvider(['Fine. €550k for 24%.'], [OPTIONS_JSON], async () => {
       if (++arrived === 2) release();
       await Promise.race([
         both,
@@ -101,7 +64,7 @@ describe('InvestorVoice', () => {
 
   it('offers no options when the action ends the game', async () => {
     const { voice: v } = voice(
-      new SplitProvider(['You have a deal: €500k for 25%.', "We're done here."], []),
+      new ScriptedThinkingProvider(['You have a deal: €500k for 25%.', "We're done here."], []),
     );
     const accepted = await v.respond(
       context,
@@ -115,7 +78,7 @@ describe('InvestorVoice', () => {
   it('falls back on both parts when the provider is down, logging no prompt or player text', async () => {
     const down = new ProviderUnavailableError();
     const secret = 'my secret pitch detail';
-    const { voice: v, lines } = voice(new SplitProvider([down], [down]));
+    const { voice: v, lines } = voice(new ScriptedThinkingProvider([down], [down]));
 
     const turn = await v.respond(
       voiceContext({ playerMessage: secret, playerOffer: { investment: 500_000, equity: 20 } }),
@@ -136,7 +99,7 @@ describe('InvestorVoice', () => {
   });
 
   it('opens with the offer and options for turn 1', async () => {
-    const { voice: v } = voice(new SplitProvider(['€500k for 30%. Your move.'], [OPTIONS_JSON]));
+    const { voice: v } = voice(new ScriptedThinkingProvider(['€500k for 30%. Your move.'], [OPTIONS_JSON]));
     const turn = await v.open(voiceContext({ history: [] }), OPENING);
     expect(turn.line.text).toBe('€500k for 30%. Your move.');
     expect(turn.options.options.every((option) => option.id.startsWith('opt-1-'))).toBe(true);

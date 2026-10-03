@@ -42,6 +42,7 @@ export function sessionFixture(playerId: string, overrides: Partial<GameSession>
       interest: 0.72,
       patience: 3,
     },
+    playerOptions: [],
     createdAt: T0,
     updatedAt: T0,
     ...overrides,

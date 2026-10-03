@@ -2,14 +2,16 @@ import {
   GamePhaseSchema,
   GameStatusSchema,
   OfferSchema,
+  PlayerOptionSchema,
   StartupPitchSchema,
   type GamePhase,
   type GameStatus,
   type Offer,
+  type PlayerOption,
   type StartupPitch,
 } from '@investor/shared';
 import { and, desc, eq, sql } from 'drizzle-orm';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { DrizzleDb } from '../db/Database.js';
 import { gameSessions } from '../db/schema.js';
 import { InvestorStateSchema, type InvestorState } from '../game/InvestorState.js';
@@ -26,13 +28,17 @@ export interface GameSession {
   turn: number;
   currentInvestorOffer: Offer | null;
   investorState: InvestorState;
+  /** The player's current reply options; empty once the game ends. */
+  playerOptions: PlayerOption[];
   createdAt: Date;
   updatedAt: Date;
 }
 
 export type GameSessionUpdate = Partial<
-  Pick<GameSession, 'status' | 'phase' | 'turn' | 'currentInvestorOffer' | 'investorState'>
+  Pick<GameSession, 'status' | 'phase' | 'turn' | 'currentInvestorOffer' | 'investorState' | 'playerOptions'>
 >;
+
+const PlayerOptionsSchema = z.array(PlayerOptionSchema);
 
 type Row = typeof gameSessions.$inferSelect;
 
@@ -54,6 +60,7 @@ export class GameSessionRepository {
         pitch: StartupPitchSchema.parse(session.pitch),
         currentInvestorOffer: session.currentInvestorOffer && OfferSchema.parse(session.currentInvestorOffer),
         investorState: InvestorStateSchema.parse(session.investorState),
+        playerOptions: PlayerOptionsSchema.parse(session.playerOptions),
       })
       .run();
     return structuredClone(session);
@@ -79,9 +86,16 @@ export class GameSessionRepository {
       .map((row) => GameSessionRepository.toSession(row));
   }
 
-  /** Applies `patch` and always refreshes `updatedAt`. */
-  update(id: string, patch: GameSessionUpdate): void {
-    this.db
+  /**
+   * Applies `patch` and always refreshes `updatedAt`. With `expectedTurn`, only a session still on that turn
+   * is updated, so a concurrent writer cannot be overwritten. Returns whether a row changed.
+   */
+  update(id: string, patch: GameSessionUpdate, options: { expectedTurn?: number } = {}): boolean {
+    const match =
+      options.expectedTurn === undefined
+        ? eq(gameSessions.id, id)
+        : and(eq(gameSessions.id, id), eq(gameSessions.turn, options.expectedTurn));
+    const result = this.db
       .update(gameSessions)
       .set({
         ...patch,
@@ -89,10 +103,12 @@ export class GameSessionRepository {
           currentInvestorOffer: OfferSchema.parse(patch.currentInvestorOffer),
         }),
         ...(patch.investorState && { investorState: InvestorStateSchema.parse(patch.investorState) }),
+        ...(patch.playerOptions && { playerOptions: PlayerOptionsSchema.parse(patch.playerOptions) }),
         updatedAt: this.clock(),
       })
-      .where(eq(gameSessions.id, id))
+      .where(match)
       .run();
+    return result.changes > 0;
   }
 
   /** Deletes the session; its messages, offers and decision logs go with it (FK cascade). */
@@ -121,6 +137,7 @@ export class GameSessionRepository {
         row.currentInvestorOffer,
       ),
       investorState: column('investor_state', InvestorStateSchema, row.investorState),
+      playerOptions: column('player_options', PlayerOptionsSchema, row.playerOptions),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

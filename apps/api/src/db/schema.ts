@@ -9,6 +9,7 @@ import type {
   OfferSide,
   StartupPitch,
 } from '@investor/shared';
+import { sql } from 'drizzle-orm';
 import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const players = sqliteTable('players', {
@@ -34,6 +35,11 @@ export const gameSessions = sqliteTable(
     turn: integer('turn').notNull(),
     currentInvestorOffer: text('current_investor_offer', { mode: 'json' }).$type<Offer>(),
     investorState: text('investor_state', { mode: 'json' }).$type<unknown>().notNull(),
+    /** The player's current reply options; empty once the game ends. */
+    playerOptions: text('player_options', { mode: 'json' })
+      .$type<unknown>()
+      .notNull()
+      .default(sql`'[]'`),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },

@@ -1,0 +1,1 @@
+ALTER TABLE `game_sessions` ADD `player_options` text DEFAULT '[]' NOT NULL;

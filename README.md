@@ -262,6 +262,24 @@ The thinking model is the investor's **voice**: it phrases what code decided and
 
 **Fallbacks:** when the thinking provider is down or keeps misbehaving, the turn still completes with the template line and code-built options. Each fallback is flagged in the result and logged at `warn` with the action and error code only.
 
+## Game engine
+
+`GameEngine` (in `apps/api/src/game/`) runs a game end to end; `GameSessionService` serves its public view and the decision insights.
+
+- **`startGame`**: checks the persona, seeds the hidden investor state from its numbers, computes the opening offer, and has the voice write the opening line and the first options.
+- **`playTurn`** resolves the move, then:
+  - A clicked **option** or a structured **offer** is used directly.
+  - **Free text** goes through Stage A and the injection guard. A confident accept or decline ends the game, and a single extracted number is completed from the investor's offer.
+  - Anything else goes through Stage B, then the policy, the turn limit and the voice (the investor's line and options for the next turn).
+
+All model calls finish before anything is written; then the turn's messages, offers, investor state, status and options are saved in **one transaction**. A failed decision call leaves the game exactly as it was (the decision log keeps the failed call). Games are scoped to their player: someone else's game is `NOT_FOUND`, like an unknown id.
+
+| Code               | Status | When                                                                                        |
+| ------------------ | ------ | ------------------------------------------------------------------------------------------- |
+| `GAME_FINISHED`    | 409    | A move for a game that has already ended                                                    |
+| `INVALID_MOVE`     | 422    | E.g. an option id that is not on offer                                                      |
+| `TURN_IN_PROGRESS` | 409    | A second move while the game's previous turn is still running (one turn at a time per game) |
+
 ## Testing the API with Postman
 
 `postman/` holds a collection and a local environment:

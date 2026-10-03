@@ -11,6 +11,9 @@ export const ErrorCodeSchema = z.enum([
   'RATE_LIMITED',
   'PROVIDER_UNAVAILABLE',
   'PROVIDER_BAD_RESPONSE',
+  'GAME_FINISHED',
+  'INVALID_MOVE',
+  'TURN_IN_PROGRESS',
   'INTERNAL_ERROR',
 ]);
 

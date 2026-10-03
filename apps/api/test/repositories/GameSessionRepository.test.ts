@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { PlayerOption } from '@investor/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Database } from '../../src/db/Database.js';
 import { GameSessionRepository } from '../../src/repositories/GameSessionRepository.js';
@@ -77,6 +78,40 @@ describe('GameSessionRepository', () => {
     expect(found.investorState.patience).toBe(2);
     expect(found.createdAt).toEqual(T0);
     expect(found.updatedAt).toEqual(LATER);
+  });
+
+  it('stores the player options and replaces them on update', () => {
+    const options: PlayerOption[] = [
+      {
+        id: 'opt-1-1',
+        kind: 'counter',
+        label: 'Counter: €500k for 20%',
+        offer: { investment: 500_000, equity: 20, impliedValuation: 2_500_000, from: 'player', turn: 1 },
+      },
+      { id: 'opt-1-2', kind: 'decline', label: 'Walk away' },
+    ];
+    const session = repository.create(sessionFixture(playerId, { playerOptions: options }));
+    expect(repository.findForPlayer(session.id, playerId)?.playerOptions).toEqual(options);
+
+    const next: PlayerOption[] = [{ id: 'opt-2-1', kind: 'accept', label: 'Accept €500k for 26%' }];
+    repository.update(session.id, { playerOptions: next });
+    expect(repository.findForPlayer(session.id, playerId)?.playerOptions).toEqual(next);
+    repository.update(session.id, { playerOptions: [] });
+    expect(repository.findForPlayer(session.id, playerId)?.playerOptions).toEqual([]);
+  });
+
+  it('rejects a counter option without an offer', () => {
+    const bad = [{ id: 'opt-1-1', kind: 'counter', label: 'Counter' }] as PlayerOption[];
+    expect(() => repository.create(sessionFixture(playerId, { playerOptions: bad }))).toThrow();
+    expect(repository.listForPlayer(playerId)).toEqual([]);
+  });
+
+  it('only updates a session still on the expected turn', () => {
+    const session = repository.create(sessionFixture(playerId, { turn: 2 }));
+    expect(repository.update(session.id, { turn: 3 }, { expectedTurn: 1 })).toBe(false);
+    expect(repository.findForPlayer(session.id, playerId)?.turn).toBe(2);
+    expect(repository.update(session.id, { turn: 3 }, { expectedTurn: 2 })).toBe(true);
+    expect(repository.findForPlayer(session.id, playerId)?.turn).toBe(3);
   });
 
   it('rejects an invalid investor state on write', () => {
