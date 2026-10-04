@@ -2,7 +2,7 @@
 
 The player pitches a startup to an AI investor and negotiates the deal. The game design and roadmap are in [`TASKS.md`](./TASKS.md); the homework brief is in [`homework-en.md`](./homework-en.md).
 
-This README covers what exists so far: the monorepo, the Express API foundation and its security baseline, and the LLM provider layer. Game features are added on top of it in later changes.
+This README covers what exists so far: the monorepo, the Express API with its security baseline, the LLM provider layer, the game (brain, policy, voice, engine, HTTP API) and the web UI.
 
 ## Prerequisites
 
@@ -21,6 +21,7 @@ echo "COOKIE_SECRET=$(openssl rand -base64 48)" >> .env
 # echo "CSRF_SECRET=$(openssl rand -base64 48)" >> .env
 pnpm dev                     # API on http://localhost:3001
 curl -i http://localhost:3001/api/health
+pnpm dev:web                 # web UI on http://localhost:5173 (second terminal)
 ```
 
 The SQLite database is created at `data/game.sqlite` on first start, and migrations run automatically.
@@ -30,7 +31,9 @@ The SQLite database is created at `data/game.sqlite` on first start, and migrati
 | Script                      | What it does                                                            |
 | --------------------------- | ----------------------------------------------------------------------- |
 | `pnpm dev`                  | Starts the API with hot reload (`tsx watch`)                            |
-| `pnpm build`                | Compiles every package with `tsc -b` into `dist/`                       |
+| `pnpm dev:web`              | Starts the web UI (Vite) on http://localhost:5173, proxying `/api`      |
+| `pnpm build`                | Compiles the API and `shared` with `tsc -b` into `dist/`                |
+| `pnpm build:web`            | Builds the web UI into `apps/web/dist/`                                 |
 | `pnpm start`                | Runs the built API (`node apps/api/dist/main.js`)                       |
 | `pnpm test`                 | Runs the Vitest suites in every package                                 |
 | `pnpm typecheck`            | Type-checks sources and tests                                           |
@@ -56,7 +59,13 @@ apps/api/            Express API
   src/brain/         the investor's brain: decision state, offer candidates, question sets, InvestorBrain
   src/voice/         the investor's voice: prompts, lines, player options, number checks (InvestorVoice)
   test/              Vitest + Supertest (in-memory SQLite)
-packages/shared/     zod schemas and types shared with the future web app (game contracts, ValuationCalculator, MoneyFormatter)
+apps/web/            React 19 + Vite web UI (Tailwind v4, shadcn/ui, TanStack Query, React Router)
+  src/api/           GameApiClient (typed fetch + zod), CsrfTokenStore, query hooks
+  src/lib/           UI helper classes: OfferFormatter, ValuationPreview, PersonaAppearance, ...
+  src/components/    ui/ (shadcn, owned code), layout/, setup/, game/, common/
+  src/pages/         SetupPage, NegotiationPage, DebriefPage, NotFoundPage
+  test/              Vitest + Testing Library (jsdom)
+packages/shared/     zod schemas and types shared by the API and the web UI (game contracts, ValuationCalculator, MoneyFormatter)
 config/app.config.json   non-secret settings (committed)
 .env                 secrets and overrides (git-ignored)
 ```
@@ -299,6 +308,32 @@ curl -s -c jar -b jar localhost:3001/api/games -H 'Content-Type: application/jso
   -d '{"personaId":"greedy-shark","pitch":{"name":"GreenCharge","sector":"EV charging","description":"Fast EV chargers.","valuation":2000000,"askAmount":500000}}'
 ```
 
+## Web UI
+
+`apps/web` is the player-facing app, built from the approved UI mock. Run it next to the API:
+
+```bash
+pnpm dev        # API on :3001
+pnpm dev:web    # UI on http://localhost:5173
+```
+
+To play without any model running, start the API with the fake providers:
+`THINKING_PROVIDER=fake DECISION_PROVIDER=fake pnpm dev`.
+
+| Screen                         | What it shows                                                                                                                                                                                              |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Setup (`/`)                    | Persona picker, pitch form with live valuation hints, "Your games" to resume                                                                                                                               |
+| Negotiation (`/games/:id`)     | Chat (with a typing indicator while a turn runs), three ways to reply (options, an offer form with an equity slider and a valuation preview, free text), the deal panel, mood hints and **Brain insights** |
+| Debrief (`/games/:id/debrief`) | Outcome, final terms, "Play again"                                                                                                                                                                         |
+
+**Brain insights** is a side sheet with every decision call of the game: stage, provider, model and latency, and each answer's value and confidence. Answers below 55% confidence are marked "uncertain". It shows the split between the brain (decision model) and the voice (LLM).
+
+**API address.** By default the UI calls `/api` on its own origin and the Vite dev server proxies it to `http://localhost:3001`, so the player cookie stays first-party. To call the API directly instead, set `VITE_API_URL` in `apps/web/.env.local` (see `apps/web/.env.example`), for example `VITE_API_URL=http://localhost:3001`. Vite reads env files from `apps/web`, not the repo root. The UI's origin must then be in `CORS_ORIGINS` (`http://localhost:5173` is allowed by default).
+
+**How it talks to the API.** `GameApiClient` sends cookies with every request and parses every response with the shared zod schemas, so an unexpected field fails instead of being shown. It fetches a CSRF token only when the server has CSRF on (`/api/csrf-token` answers 404 otherwise), and retries once after `CSRF_INVALID`.
+
+The UI only shows what the API sends: interest, patience and trust are hints, never numbers, and the debrief does not reveal the investor's hidden limits. The theme follows the system and can be toggled in the header; the choice is remembered.
+
 ## Testing the API with Postman
 
 `postman/` holds a collection and a local environment:
@@ -368,4 +403,4 @@ Clearing cookies starts a new anonymous player. This is by design, since the gam
 - `tsx` (`pnpm dev`) and Vitest run with that condition, so changes to `shared` take effect without a build.
 - `pnpm build` and `pnpm start` resolve the compiled `dist/` instead.
 
-If you add a new tool that imports `@investor/shared`, enable that condition in it too.
+If you add a new tool that imports `@investor/shared`, enable that condition in it too. The web app's Vite config aliases `@investor/shared` to its `src/index.ts` instead, so `vite build` bundles the sources and never needs `shared/dist`.

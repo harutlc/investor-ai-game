@@ -8,7 +8,9 @@
   },
   "scripts": {
     "dev": "pnpm --filter @investor/api dev",
+    "dev:web": "pnpm --filter @investor/web dev",
     "build": "tsc -b",
+    "build:web": "pnpm --filter @investor/web build",
     "start": "pnpm --filter @investor/api start",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
@@ -23,6 +25,8 @@
     "@types/node": "^22.20.5",
     "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
     "prettier": "^3.9.9",
     "typescript": "~6.0.3",

@@ -1,6 +1,8 @@
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
+import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -35,8 +37,20 @@ export default tseslint.config(
     },
   },
   {
+    // The web app runs in the browser: DOM globals, the rules of hooks, and Vite fast-refresh boundaries.
+    files: ['apps/web/**/*.{ts,tsx}'],
+    languageOptions: { globals: globals.browser },
+    ...reactHooks.configs.flat['recommended-latest'],
+  },
+  {
+    files: ['apps/web/src/**/*.tsx'],
+    ...reactRefresh.configs.vite,
+    // shadcn's generated components export their cva variants next to the component; that is intended.
+    ignores: ['apps/web/src/components/ui/**'],
+  },
+  {
     // Supertest response bodies and Vitest asymmetric matchers are typed `any`; production code stays strict.
-    files: ['**/test/**/*.ts'],
+    files: ['**/test/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',

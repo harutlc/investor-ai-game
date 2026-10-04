@@ -1,0 +1,166 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/bricolage-grotesque/index.css';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Colours from the approved mock: ink #15181E on #EDEFF2, accent green #0E6B4F, IBM Plex for text and
+ * numbers, Bricolage Grotesque for headings. shadcn's tokens are mapped onto that palette; the extra
+ * tokens (ink, chat, info, warn, stage-a) cover the mock's header, chat and badges. Text pairs meet
+ * WCAG AA in both themes.
+ */
+@theme inline {
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-heading: 'Bricolage Grotesque Variable', 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-ink: var(--ink);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-raised: var(--ink-raised);
+  --color-bubble: var(--bubble);
+  --color-bubble-foreground: var(--bubble-foreground);
+  --color-chat: var(--chat);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-stage-a: var(--stage-a);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+:root {
+  --radius: 0.625rem;
+
+  --background: #edeff2;
+  --foreground: #15181e;
+  --card: #ffffff;
+  --card-foreground: #15181e;
+  --popover: #ffffff;
+  --popover-foreground: #15181e;
+  --primary: #0e6b4f;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0f3;
+  --secondary-foreground: #15181e;
+  --muted: #eef0f3;
+  --muted-foreground: #5a6170;
+  --accent: #e7f2ec;
+  --accent-foreground: #0a4f3a;
+  --destructive: #9b1c14;
+  --border: #d9dde3;
+  --input: #c3c8d0;
+  --ring: #2f55c8;
+
+  --ink: #15181e;
+  --ink-foreground: #ffffff;
+  --ink-muted: #aeb5c2;
+  --ink-raised: #2b303a;
+  --bubble: #15181e;
+  --bubble-foreground: #ffffff;
+  --chat: #f7f8fa;
+  --info: #e8eefb;
+  --info-foreground: #22408f;
+  --warn: #ffe9d6;
+  --warn-foreground: #8a3b00;
+  --danger: #fce8e6;
+  --danger-foreground: #9b1c14;
+  --stage-a: #4a3b8c;
+}
+
+.dark {
+  --background: #0f1115;
+  --foreground: #e8ebf0;
+  --card: #171a20;
+  --card-foreground: #e8ebf0;
+  --popover: #1b1f26;
+  --popover-foreground: #e8ebf0;
+  --primary: #4cc79a;
+  --primary-foreground: #06261b;
+  --secondary: #232833;
+  --secondary-foreground: #e8ebf0;
+  --muted: #232833;
+  --muted-foreground: #a3aab7;
+  --accent: #133a2d;
+  --accent-foreground: #9fe2c5;
+  --destructive: #f28b82;
+  --border: #2b303a;
+  --input: #3a404c;
+  --ring: #7c9bf2;
+
+  --ink: #0a0c10;
+  --ink-foreground: #f3f5f8;
+  --ink-muted: #a3aab7;
+  --ink-raised: #232833;
+  --bubble: #2e3440;
+  --bubble-foreground: #f3f5f8;
+  --chat: #12151a;
+  --info: #1e2a4a;
+  --info-foreground: #b4c7ff;
+  --warn: #3d2510;
+  --warn-foreground: #ffc08f;
+  --danger: #3a1714;
+  --danger-foreground: #ffaaa2;
+  --stage-a: #6a5bc4;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-heading;
+  }
+}
+
+@keyframes typing-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
