@@ -26,6 +26,57 @@ pnpm dev:web                 # web UI on http://localhost:5173 (second terminal)
 
 The SQLite database is created at `data/game.sqlite` on first start, and migrations run automatically.
 
+## Docker
+
+The root `Dockerfile` builds two images, and `docker-compose.yml` runs them together:
+
+- `api` runs the compiled API with production dependencies only, as a non-root user.
+- `web` is nginx serving the built UI. It proxies `/api` to the API, so the browser sees one origin, as with the Vite dev proxy.
+
+Only the web port is published. You need Docker with Compose v2 (for example Docker Desktop); Node and pnpm are not needed on the host.
+
+```bash
+cp .env.example .env
+echo "COOKIE_SECRET=$(openssl rand -base64 48)" >> .env
+# Pick real providers in .env: the example selects jev, which needs TYPESAFE_API_KEY
+# (or set DECISION_PROVIDER=laya and run laya-serve on the host). See "LLM providers" below.
+docker compose up --build    # http://localhost:8080
+```
+
+Without any LLM provider, use the development-mode command under "Production mode over plain HTTP" below.
+
+The `api` service must pass its `/api/health` check before `web` starts. Secrets and provider settings come from `.env`. Compose pins these values for the container, overriding `.env`:
+
+| Container value   | Default                             | Override with            |
+| ----------------- | ----------------------------------- | ------------------------ |
+| `NODE_ENV`        | `production`                        | `DOCKER_NODE_ENV`        |
+| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | `DOCKER_OLLAMA_BASE_URL` |
+| `LAYA_BASE_URL`   | `http://host.docker.internal:8000`  | `DOCKER_LAYA_BASE_URL`   |
+| web port          | `8080`                              | `WEB_PORT`               |
+
+`THINKING_PROVIDER` and `DECISION_PROVIDER` are passed through, so a value set in the shell wins over `.env`. `DOCKER_*` names are used because the `NODE_ENV` and URLs in a local `.env` describe the dev setup, not the containers. Compose also sets `PORT=3001`, `DATABASE_FILE=/app/data/game.sqlite` and `TRUST_PROXY=1`. Only nginx reaches the API, so the API trusts exactly one hop for the client IP, and rate limits stay per player.
+
+**LLM providers.**
+
+- Ollama and laya-serve keep running on the host, and the API reaches them through `host.docker.internal`. This also works on Linux Docker Engine.
+- On Linux, Ollama must listen on all interfaces: `OLLAMA_HOST=0.0.0.0 ollama serve`.
+- Anthropic and Jev only need their API keys in `.env`.
+- An unreachable provider shows up as `"error"` in `/api/health` and does not stop the stack.
+
+**Production mode over plain HTTP.**
+
+- The containers run with `NODE_ENV=production`, so the player cookie is `Secure` with a `__Host-` prefix.
+- Chrome and Firefox accept it on `http://localhost`. Other browsers, or opening the game by LAN IP or hostname, drop it, and every request then starts a new player. Use TLS in front, or development mode.
+- Fake providers are refused in production. To play with no LLM services at all:
+
+```bash
+DOCKER_NODE_ENV=development THINKING_PROVIDER=fake DECISION_PROVIDER=fake docker compose up --build
+```
+
+**CSRF.** The web image is built with `VITE_CSRF_ENABLED` set from the same `CSRF_ENABLED` value in `.env`, so the UI matches the API. Rebuild the images after you change it.
+
+**Data.** The database lives in the `game-data` volume. It survives `docker compose down`, restarts and rebuilds. `docker compose down -v` deletes it. The stack assumes a single API replica: SQLite and the in-memory rate limits are per process.
+
 ## Scripts (run from the repo root)
 
 | Script                      | What it does                                                            |
@@ -86,24 +137,25 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 
 `config/app.config.json` holds non-secret settings. Environment variables (or `.env`) supply the secrets and can override some values:
 
-| Variable            | Overrides / purpose                                               |
-| ------------------- | ----------------------------------------------------------------- |
-| `COOKIE_SECRET`     | **Required.** At least 32 characters                              |
-| `CSRF_ENABLED`      | `security.csrf.enabled` (`true` / `false`; `false` by default)    |
-| `CSRF_SECRET`       | Required only when CSRF is enabled; 32+ chars, not the cookie one |
-| `NODE_ENV`          | `development` (default), `production` or `test`                   |
-| `PORT`              | `server.port`                                                     |
-| `CORS_ORIGINS`      | `cors.origins` (a comma-separated list of exact origins; no `*`)  |
-| `DATABASE_FILE`     | `database.file` (relative to the repo root, or `:memory:`)        |
-| `LOG_LEVEL`         | `logging.level`                                                   |
-| `APP_CONFIG_PATH`   | Path to an alternative config file                                |
-| `THINKING_PROVIDER` | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)         |
-| `DECISION_PROVIDER` | `llm.decision.provider` (`laya`, `jev` or `fake`)                 |
-| `OLLAMA_BASE_URL`   | `llm.thinking.providers.ollama.baseUrl`                           |
-| `LAYA_BASE_URL`     | `llm.decision.providers.laya.baseUrl`                             |
-| `ANTHROPIC_API_KEY` | Required when the thinking provider is `anthropic`                |
-| `TYPESAFE_API_KEY`  | Required when the decision provider is `jev`                      |
-| `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one  |
+| Variable            | Overrides / purpose                                                    |
+| ------------------- | ---------------------------------------------------------------------- |
+| `COOKIE_SECRET`     | **Required.** At least 32 characters                                   |
+| `CSRF_ENABLED`      | `security.csrf.enabled` (`true` / `false`; `false` by default)         |
+| `CSRF_SECRET`       | Required only when CSRF is enabled; 32+ chars, not the cookie one      |
+| `NODE_ENV`          | `development` (default), `production` or `test`                        |
+| `PORT`              | `server.port`                                                          |
+| `TRUST_PROXY`       | `server.trustProxy` (`false`, a hop count or a comma list; not `true`) |
+| `CORS_ORIGINS`      | `cors.origins` (a comma-separated list of exact origins; no `*`)       |
+| `DATABASE_FILE`     | `database.file` (relative to the repo root, or `:memory:`)             |
+| `LOG_LEVEL`         | `logging.level`                                                        |
+| `APP_CONFIG_PATH`   | Path to an alternative config file                                     |
+| `THINKING_PROVIDER` | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)              |
+| `DECISION_PROVIDER` | `llm.decision.provider` (`laya`, `jev` or `fake`)                      |
+| `OLLAMA_BASE_URL`   | `llm.thinking.providers.ollama.baseUrl`                                |
+| `LAYA_BASE_URL`     | `llm.decision.providers.laya.baseUrl`                                  |
+| `ANTHROPIC_API_KEY` | Required when the thinking provider is `anthropic`                     |
+| `TYPESAFE_API_KEY`  | Required when the decision provider is `jev`                           |
+| `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one       |
 
 Invalid configuration stops startup with a list of every problem. Secret values are never printed.
 

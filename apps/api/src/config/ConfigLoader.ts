@@ -46,9 +46,18 @@ const booleanFlag = (raw: string): unknown => {
   return value === 'true' ? true : value === 'false' ? false : raw;
 };
 
+/** "false", a hop count, or a comma list of addresses/CIDRs. "true" is left for the schema to reject. */
+const trustProxy = (raw: string): unknown => {
+  const value = raw.trim();
+  if (value.toLowerCase() === 'false') return false;
+  if (value.toLowerCase() === 'true') return raw;
+  return /^\d+$/.test(value) ? Number(value) : commaList(value);
+};
+
 /** Config values an environment variable may override (the env value wins). */
 const ENV_OVERRIDES: readonly EnvOverride[] = [
   { path: 'server.port', env: 'PORT' },
+  { path: 'server.trustProxy', env: 'TRUST_PROXY', parse: trustProxy },
   { path: 'cors.origins', env: 'CORS_ORIGINS', parse: commaList },
   { path: 'database.file', env: 'DATABASE_FILE' },
   { path: 'logging.level', env: 'LOG_LEVEL' },

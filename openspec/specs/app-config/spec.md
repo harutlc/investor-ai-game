@@ -18,7 +18,14 @@ The system SHALL load non-secret settings from a committed JSON config file (`co
 - **THEN** the API uses them to sign cookies and CSRF tokens
 
 ### Requirement: Environment overrides
-The system SHALL let selected environment variables override values from the config file: at least `PORT`, `CORS_ORIGINS` (comma-separated), `DATABASE_FILE`, `LOG_LEVEL` and `NODE_ENV`. An environment value MUST win over the file value.
+The system SHALL let selected environment variables override values from the config file: at least `PORT`, `CORS_ORIGINS` (comma-separated), `DATABASE_FILE`, `LOG_LEVEL`, `NODE_ENV` and `TRUST_PROXY`. An environment value MUST win over the file value.
+
+`TRUST_PROXY` overrides `server.trustProxy`. It accepts:
+- `false`, which trusts no proxy;
+- a positive integer, which is a hop count;
+- a comma-separated list of proxy addresses or CIDRs.
+
+`true` MUST be rejected at startup, as it is in the config file. Trusting every hop would let any client spoof its IP and get around per-IP rate limits.
 
 #### Scenario: Port override
 - **WHEN** the config file sets the port to 3001 and the environment sets `PORT=4000`
@@ -27,6 +34,22 @@ The system SHALL let selected environment variables override values from the con
 #### Scenario: CORS origins override
 - **WHEN** the environment sets `CORS_ORIGINS=https://a.example,https://b.example`
 - **THEN** exactly those two origins are allowed and the file's origin list is ignored
+
+#### Scenario: Trust proxy hop count
+- **WHEN** the config file sets `server.trustProxy` to `false` and the environment sets `TRUST_PROXY=1`
+- **THEN** the API trusts one proxy hop and takes the client IP from the `X-Forwarded-For` value that proxy appended
+
+#### Scenario: Trust proxy address list
+- **WHEN** the environment sets `TRUST_PROXY=10.0.0.0/8,172.16.0.0/12`
+- **THEN** the API trusts exactly those two ranges as proxies
+
+#### Scenario: Trust proxy disabled
+- **WHEN** the environment sets `TRUST_PROXY=false`
+- **THEN** the API trusts no proxy and ignores `X-Forwarded-For` when it picks the client IP
+
+#### Scenario: Trust-all is refused
+- **WHEN** the environment sets `TRUST_PROXY=true`
+- **THEN** startup aborts with a non-zero exit code and a message that names `server.trustProxy (from TRUST_PROXY)`
 
 ### Requirement: Validation and fail-fast startup
 The system SHALL validate the merged configuration against a schema before it opens any port or database connection. When validation fails, the process MUST exit with a non-zero code and print a message that names every invalid or missing key. Keys that are required only conditionally (for example `CSRF_SECRET` while CSRF protection is enabled, or the active provider's API key) MAY be reported in a second pass, once the other problems are fixed. The message MUST NOT print secret values.

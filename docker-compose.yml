@@ -1,0 +1,59 @@
+# docker compose up --build   →   http://localhost:8080 (WEB_PORT overrides the port)
+#
+# Secrets and provider settings come from .env. The values under `environment:` describe the container
+# and win over .env. They read DOCKER_* variables, not NODE_ENV / OLLAMA_BASE_URL, because Compose also
+# interpolates from .env, whose local-dev values (development mode, localhost URLs) are wrong in here.
+
+services:
+  api:
+    build:
+      context: .
+      target: api
+    env_file: .env
+    environment:
+      NODE_ENV: ${DOCKER_NODE_ENV:-production}
+      PORT: '3001'
+      DATABASE_FILE: /app/data/game.sqlite
+      # Only nginx reaches this container, so exactly one hop is trusted for the client IP.
+      TRUST_PROXY: '1'
+      CORS_ORIGINS: http://localhost:${WEB_PORT:-8080}
+      OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      LAYA_BASE_URL: ${DOCKER_LAYA_BASE_URL:-http://host.docker.internal:8000}
+      # Passed through so a shell value (e.g. `THINKING_PROVIDER=fake docker compose up`) beats .env, which
+      # env_file alone would not allow. Empty means unset, so the config file's provider applies.
+      THINKING_PROVIDER: ${THINKING_PROVIDER:-}
+      DECISION_PROVIDER: ${DECISION_PROVIDER:-}
+    extra_hosts:
+      # Docker Desktop provides this name; Linux Docker Engine needs the mapping.
+      - host.docker.internal:host-gateway
+    volumes:
+      - game-data:/app/data
+    init: true
+    # Above the API's 10 s shutdownTimeoutMs, so in-flight requests can finish.
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      target: web
+      args:
+        # The UI must match the API's CSRF setting.
+        VITE_CSRF_ENABLED: ${CSRF_ENABLED:-}
+    ports:
+      - ${WEB_PORT:-8080}:8080
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  game-data:

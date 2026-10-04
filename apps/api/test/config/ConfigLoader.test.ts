@@ -172,6 +172,36 @@ describe('ConfigLoader: CSRF flag', () => {
   });
 });
 
+describe('ConfigLoader: TRUST_PROXY', () => {
+  it('trusts no proxy in the committed config', () => {
+    expect(load().server.trustProxy).toBe(false);
+  });
+
+  it('reads a hop count', () => {
+    expect(load({ TRUST_PROXY: '1' }).server.trustProxy).toBe(1);
+  });
+
+  it('reads a comma list of addresses', () => {
+    expect(load({ TRUST_PROXY: '10.0.0.0/8, 172.16.0.0/12' }).server.trustProxy).toEqual([
+      '10.0.0.0/8',
+      '172.16.0.0/12',
+    ]);
+  });
+
+  it('reads false over a file value', () => {
+    writeConfig((config) => {
+      config.server!.trustProxy = 2;
+    });
+    expect(load({ TRUST_PROXY: 'false' }).server.trustProxy).toBe(false);
+  });
+
+  it('rejects true and names the env var', () => {
+    expect(loadError({ COOKIE_SECRET, CSRF_SECRET, TRUST_PROXY: 'true' }).message).toContain(
+      'server.trustProxy (from TRUST_PROXY)',
+    );
+  });
+});
+
 describe('ConfigLoader: LLM providers', () => {
   const ANTHROPIC_KEY = 'sk-ant-test-key-should-never-be-printed';
 

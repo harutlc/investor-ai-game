@@ -1,0 +1,39 @@
+# Build context for the root Dockerfile. Keep secrets, local data and host-built artifacts out.
+
+# dependencies and build output (host-built native modules must never reach a Linux image)
+**/node_modules
+**/dist
+coverage
+*.tsbuildinfo
+
+# local database
+data
+*.sqlite
+*.sqlite-*
+
+# secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# VCS, editor and tooling
+.git
+.gitignore
+.idea
+.claude
+.agents
+.DS_Store
+openspec
+postman
+
+# docs not needed to build
+*.md
+homework-raw.txt
+
+# Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml
