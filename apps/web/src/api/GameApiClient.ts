@@ -23,6 +23,8 @@ type Method = 'GET' | 'POST';
 export interface GameApiClientOptions {
   /** Prefix for every `/api/...` path; empty for same-origin requests. */
   baseUrl?: string;
+  /** Send CSRF tokens on mutations; match the API's `CSRF_ENABLED` (off by default). */
+  csrf?: boolean;
   fetch?: typeof fetch;
 }
 
@@ -36,19 +38,24 @@ const CSRF_HEADER = 'X-CSRF-Token';
 export class GameApiClient {
   private readonly baseUrl: string;
   private readonly fetchFn: typeof fetch;
-  private readonly csrf: CsrfTokenStore;
+  /** Null while CSRF is off: mutations go out without a token and `/api/csrf-token` is never called. */
+  private readonly csrf: CsrfTokenStore | null;
 
   constructor(options: GameApiClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? '').replace(/\/+$/, '');
     // Bound so the browser's fetch is never called with a foreign `this`.
     this.fetchFn = options.fetch ?? globalThis.fetch.bind(globalThis);
-    this.csrf = new CsrfTokenStore(() => this.loadCsrfToken());
+    this.csrf = options.csrf === true ? new CsrfTokenStore(() => this.loadCsrfToken()) : null;
   }
 
-  /** A client configured from `VITE_API_URL`. */
+  /** A client configured from `VITE_API_URL` and `VITE_CSRF_ENABLED`. */
   static fromEnv(): GameApiClient {
     const baseUrl: unknown = import.meta.env.VITE_API_URL;
-    return new GameApiClient({ baseUrl: typeof baseUrl === 'string' ? baseUrl : '' });
+    const csrf: unknown = import.meta.env.VITE_CSRF_ENABLED;
+    return new GameApiClient({
+      baseUrl: typeof baseUrl === 'string' ? baseUrl : '',
+      csrf: csrf === 'true',
+    });
   }
 
   listPersonas(): Promise<PersonaListDto> {
@@ -81,13 +88,16 @@ export class GameApiClient {
     schema: S,
     body?: unknown,
   ): Promise<z.output<S>> {
-    if (method === 'GET') return this.parse(await this.send(method, path, body, null), schema);
+    const csrf = this.csrf;
+    if (method === 'GET' || csrf === null) {
+      return this.parse(await this.send(method, path, body, null), schema);
+    }
 
-    let response = await this.send(method, path, body, await this.csrf.token());
+    let response = await this.send(method, path, body, await csrf.token());
     if (response.status === 403 && (await GameApiClient.isCsrfRejection(response))) {
-      // The token expired or the server turned CSRF on: one fresh token, one retry.
-      this.csrf.invalidate();
-      response = await this.send(method, path, body, await this.csrf.token());
+      // The token expired: one fresh token, one retry.
+      csrf.invalidate();
+      response = await this.send(method, path, body, await csrf.token());
     }
     return this.parse(response, schema);
   }
@@ -133,7 +143,7 @@ export class GameApiClient {
     return parsed.data;
   }
 
-  /** GET /api/csrf-token; 404 means CSRF is off on this server. */
+  /** GET /api/csrf-token; a 404 means the server has CSRF off after all, so no token is sent. */
   private async loadCsrfToken(): Promise<string | null> {
     const response = await this.send('GET', '/api/csrf-token', undefined, null);
     if (response.status === 404) return null;

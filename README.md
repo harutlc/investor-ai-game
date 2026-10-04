@@ -330,7 +330,7 @@ To play without any model running, start the API with the fake providers:
 
 **API address.** By default the UI calls `/api` on its own origin and the Vite dev server proxies it to `http://localhost:3001`, so the player cookie stays first-party. To call the API directly instead, set `VITE_API_URL` in `apps/web/.env.local` (see `apps/web/.env.example`), for example `VITE_API_URL=http://localhost:3001`. Vite reads env files from `apps/web`, not the repo root. The UI's origin must then be in `CORS_ORIGINS` (`http://localhost:5173` is allowed by default).
 
-**How it talks to the API.** `GameApiClient` sends cookies with every request and parses every response with the shared zod schemas, so an unexpected field fails instead of being shown. It fetches a CSRF token only when the server has CSRF on (`/api/csrf-token` answers 404 otherwise), and retries once after `CSRF_INVALID`.
+**How it talks to the API.** `GameApiClient` sends cookies with every request and parses every response with the shared zod schemas, so an unexpected field fails instead of being shown. CSRF is off by default, like the API's: mutations carry no token and the UI never calls `/api/csrf-token`. If you run the API with `CSRF_ENABLED=true`, also set `VITE_CSRF_ENABLED=true` in `apps/web/.env.local`; the client then fetches a token for the first mutation and retries once after `CSRF_INVALID`.
 
 The UI only shows what the API sends: interest, patience and trust are hints, never numbers, and the debrief does not reveal the investor's hidden limits. The theme follows the system and can be toggled in the header; the choice is remembered.
 

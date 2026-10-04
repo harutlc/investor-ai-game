@@ -43,14 +43,18 @@ A non-2xx response SHALL become an error carrying the HTTP status and the envelo
 - **THEN** the caller receives an error with code `NETWORK_ERROR`
 
 ### Requirement: Optional CSRF token
-For state-changing requests (POST, PUT, PATCH, DELETE), the web app SHALL get a token from `GET /api/csrf-token` the first time one is needed and send it as `X-CSRF-Token`. If that endpoint answers 404 (CSRF disabled on the server), the app MUST send mutations without the header and MUST NOT ask again. If a mutation fails with 403 `CSRF_INVALID`, the app MUST fetch a fresh token and retry that request exactly once.
+CSRF handling SHALL be off unless `VITE_CSRF_ENABLED` is `true`, matching the API's default of `CSRF_ENABLED=false`. While it is off, state-changing requests (POST, PUT, PATCH, DELETE) MUST be sent without an `X-CSRF-Token` header, the app MUST NOT call `GET /api/csrf-token`, and a 403 MUST NOT be retried. While it is on, the app SHALL get a token from `GET /api/csrf-token` the first time a mutation needs one and send it as `X-CSRF-Token`. If that endpoint answers 404, the app MUST send mutations without the header and MUST NOT ask again. If a mutation fails with 403 `CSRF_INVALID`, the app MUST fetch a fresh token and retry that request exactly once.
 
-#### Scenario: CSRF disabled
-- **WHEN** `/api/csrf-token` returns 404 and the player starts a game
-- **THEN** `POST /api/games` is sent without an `X-CSRF-Token` header and succeeds
+#### Scenario: CSRF off (the default)
+- **WHEN** `VITE_CSRF_ENABLED` is unset and the player starts a game
+- **THEN** `POST /api/games` is sent without an `X-CSRF-Token` header, and `/api/csrf-token` is never requested
+
+#### Scenario: CSRF on
+- **WHEN** `VITE_CSRF_ENABLED` is `true` and the player starts a game
+- **THEN** the app requests `/api/csrf-token` once and sends the token as `X-CSRF-Token`
 
 #### Scenario: Expired token
-- **WHEN** a turn is rejected with 403 `CSRF_INVALID`
+- **WHEN** CSRF is on and a turn is rejected with 403 `CSRF_INVALID`
 - **THEN** the app fetches a new token and resends the same turn once; a second 403 is reported as an error
 
 #### Scenario: Reads need no token

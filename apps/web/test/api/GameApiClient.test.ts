@@ -4,9 +4,9 @@ import { GameApiClient } from '@/api/GameApiClient';
 import { apiError, FakeFetch, json } from '../support/FakeFetch';
 import { GAME_ID, PITCH, session, SHARK, turnResult } from '../support/fixtures';
 
-function setup(baseUrl = '') {
+function setup(baseUrl = '', csrf = false) {
   const fake = new FakeFetch();
-  return { fake, client: new GameApiClient({ baseUrl, fetch: fake.fetch }) };
+  return { fake, client: new GameApiClient({ baseUrl, csrf, fetch: fake.fetch }) };
 }
 
 async function failure(promise: Promise<unknown>): Promise<ApiClientError> {
@@ -47,7 +47,7 @@ describe('GameApiClient responses', () => {
 
   it('maps the error envelope to status and code', async () => {
     const { fake, client } = setup();
-    fake.reply(json(404, {}), apiError(409, 'GAME_FINISHED', 'The game is over.'));
+    fake.reply(apiError(409, 'GAME_FINISHED', 'The game is over.'));
 
     const error = await failure(client.playTurn(GAME_ID, { optionId: 'opt-1' }));
     expect(error).toMatchObject({
@@ -77,7 +77,7 @@ describe('GameApiClient responses', () => {
 
 describe('GameApiClient CSRF', () => {
   it('never asks for a token on reads', async () => {
-    const { fake, client } = setup();
+    const { fake, client } = setup('', true);
     fake.reply(json(200, { games: [] }), json(200, session()));
 
     await client.listGames();
@@ -86,8 +86,32 @@ describe('GameApiClient CSRF', () => {
     expect(fake.calls.every((call) => !('X-CSRF-Token' in call.headers))).toBe(true);
   });
 
-  it('sends mutations without a header when CSRF is off, and asks only once', async () => {
+  it('sends mutations without a token or a token request when CSRF is off (the default)', async () => {
     const { fake, client } = setup();
+    fake.reply(json(201, session()), json(200, turnResult()));
+
+    await client.startGame({ personaId: 'greedy-shark', pitch: PITCH });
+    await client.playTurn(GAME_ID, { message: 'Hi' });
+
+    expect(fake.calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      'POST /api/games',
+      `POST /api/games/${GAME_ID}/turns`,
+    ]);
+    expect(fake.calls.every((call) => !('X-CSRF-Token' in call.headers))).toBe(true);
+    expect(fake.calls[0]!.body).toEqual({ personaId: 'greedy-shark', pitch: PITCH });
+  });
+
+  it('does not retry a 403 when CSRF is off', async () => {
+    const { fake, client } = setup();
+    fake.reply(apiError(403, 'CSRF_INVALID'));
+
+    const error = await failure(client.playTurn(GAME_ID, { optionId: 'opt-1' }));
+    expect(error).toMatchObject({ status: 403, code: 'CSRF_INVALID' });
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('sends no header when CSRF is on but the server answers the token request with 404', async () => {
+    const { fake, client } = setup('', true);
     fake.reply(json(404, {}), json(201, session()), json(200, turnResult()));
 
     await client.startGame({ personaId: 'greedy-shark', pitch: PITCH });
@@ -99,11 +123,10 @@ describe('GameApiClient CSRF', () => {
       `POST /api/games/${GAME_ID}/turns`,
     ]);
     expect(fake.calls[1]!.headers).not.toHaveProperty('X-CSRF-Token');
-    expect(fake.calls[1]!.body).toEqual({ personaId: 'greedy-shark', pitch: PITCH });
   });
 
   it('sends the token when CSRF is on', async () => {
-    const { fake, client } = setup();
+    const { fake, client } = setup('', true);
     fake.reply(json(200, { csrfToken: 'tok-1' }), json(201, session()));
 
     await client.startGame({ personaId: 'greedy-shark', pitch: PITCH });
@@ -111,7 +134,7 @@ describe('GameApiClient CSRF', () => {
   });
 
   it('refreshes the token once after CSRF_INVALID and retries', async () => {
-    const { fake, client } = setup();
+    const { fake, client } = setup('', true);
     fake.reply(
       json(200, { csrfToken: 'old' }),
       apiError(403, 'CSRF_INVALID'),
@@ -131,7 +154,7 @@ describe('GameApiClient CSRF', () => {
   });
 
   it('surfaces a second CSRF_INVALID', async () => {
-    const { fake, client } = setup();
+    const { fake, client } = setup('', true);
     fake.reply(
       json(200, { csrfToken: 'old' }),
       apiError(403, 'CSRF_INVALID'),
