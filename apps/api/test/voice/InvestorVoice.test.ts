@@ -3,6 +3,7 @@ import { OfferCandidateExtractor } from '../../src/brain/OfferCandidateExtractor
 import type { InvestorAction } from '../../src/game/InvestorAction.js';
 import { ProviderUnavailableError } from '../../src/llm/errors/ProviderUnavailableError.js';
 import type { ThinkingProvider } from '../../src/llm/thinking/ThinkingProvider.js';
+import { ClosingGenerator } from '../../src/voice/ClosingGenerator.js';
 import { InvestorDialogueGenerator } from '../../src/voice/InvestorDialogueGenerator.js';
 import { InvestorVoice } from '../../src/voice/InvestorVoice.js';
 import { NumberConsistencyChecker } from '../../src/voice/NumberConsistencyChecker.js';
@@ -32,6 +33,7 @@ function voice(provider: ThinkingProvider) {
     lines,
     voice: new InvestorVoice(
       new OpeningGenerator(writer),
+      new ClosingGenerator(writer),
       new InvestorDialogueGenerator(writer),
       options,
       logger,
@@ -103,5 +105,16 @@ describe('InvestorVoice', () => {
     const turn = await v.open(voiceContext({ history: [] }), OPENING);
     expect(turn.line.text).toBe('€500k for 30%. Your move.');
     expect(turn.options.options.every((option) => option.id.startsWith('opt-1-'))).toBe(true);
+  });
+
+  it("closes the player's accept with one line and no options", async () => {
+    const provider = new ScriptedThinkingProvider(['Deal. €550k for 24%, welcome aboard.'], []);
+    const turn = await voice(provider).voice.close(context, { investment: 550_000, equity: 24 });
+    expect(turn).toEqual({
+      line: { text: 'Deal. €550k for 24%, welcome aboard.', fallback: false },
+      options: null,
+    });
+    expect(provider.json.requests).toHaveLength(0);
+    expect(provider.text.requests[0]?.system).toContain('The founder has accepted your offer.');
   });
 });

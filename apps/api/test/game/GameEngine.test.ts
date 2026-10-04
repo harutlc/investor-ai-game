@@ -126,6 +126,8 @@ describe('GameEngine.playTurn', () => {
       options: [],
     });
     expect(result.newMessages.map((message) => message.role)).toEqual(['player', 'investor']);
+    // The thinking provider is down, so the closing template is used, not the policy-accept one.
+    expect(result.newMessages[1]!.text).toBe('Deal. €500k for 40% it is.');
     expect(decisions.requests).toHaveLength(0);
   });
 

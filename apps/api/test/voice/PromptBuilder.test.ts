@@ -22,6 +22,13 @@ describe('PromptBuilder.line', () => {
     expect(request.system).toContain(voiceContext().persona.toneInstructions);
   });
 
+  it("confirms the investor's own offer when the player accepted it", () => {
+    const request = builder.line(voiceContext(), { kind: 'closing', offer: OPENING });
+    expect(request.system).toContain('The founder has accepted your offer.');
+    expect(request.system).toContain('NUMBERS TO STATE: €500k (€500,000) for 30%.');
+    expect(request.system).not.toContain("Accept the founder's offer");
+  });
+
   it('only offers the current numbers as optional for holding actions', () => {
     const request = builder.line(voiceContext(), { kind: 'reject', offer: OPENING });
     expect(request.system).toContain('If you mention your offer, it is: €500k (€500,000) for 30%.');

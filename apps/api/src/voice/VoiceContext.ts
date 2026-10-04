@@ -22,11 +22,19 @@ export interface VoiceContext {
   previousInvestorOffer: OfferInput | null;
 }
 
-/** The line to write: the opening, or the reply to a policy action, with the offer it states (if any). */
+/**
+ * The line to write, with the offer it states (if any): the opening, the reply to a policy action, or the
+ * closing line when the player accepts the investor's offer.
+ */
 export interface LineSubject {
-  kind: InvestorActionKind | 'opening';
+  kind: InvestorActionKind | 'opening' | 'closing';
   offer: OfferInput | null;
 }
 
 /** Lines that must state their offer; the others may only restate it. */
-export const MUST_STATE_OFFER: ReadonlySet<LineSubject['kind']> = new Set(['opening', 'counter', 'accept']);
+export const MUST_STATE_OFFER: ReadonlySet<LineSubject['kind']> = new Set([
+  'opening',
+  'counter',
+  'accept',
+  'closing',
+]);

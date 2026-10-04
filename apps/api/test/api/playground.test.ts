@@ -16,7 +16,9 @@ type App = ReturnType<typeof createTestApp>['app'];
 async function browser(app: App) {
   const agent = request.agent(app);
   const { csrfToken } = (await agent.get('/api/csrf-token')).body as { csrfToken: string };
-  return { post: (path: string, body: object) => agent.post(path).set('X-CSRF-Token', csrfToken).send(body) };
+  const post = (path: string, body: object | string) =>
+    agent.post(path).set('X-CSRF-Token', csrfToken).type('json').send(body);
+  return { post };
 }
 
 const conversation = {
@@ -88,6 +90,29 @@ describe('playground: thinking JSON', () => {
       schema: { type: 'object', properties },
     });
     expect(res.status).toBe(400);
+  });
+
+  it('rejects a schema one level too deep', async () => {
+    let nested: object = { type: 'string' };
+    for (let level = 0; level < 11; level++) nested = { type: 'array', items: nested };
+    const { app } = createTestApp();
+    const res = await (
+      await browser(app)
+    ).post('/api/dev/thinking/json', { ...conversation, schema: nested });
+    expect(res.status).toBe(400);
+    expect(res.body.error.details[0].message).toContain('nested at most 10 levels');
+  });
+
+  it('rejects an extremely deep schema with 400, not a stack overflow', async () => {
+    const levels = 20_000;
+    const schema = `{"items":${'['.repeat(levels)}${']'.repeat(levels)}}`;
+    const body = `${JSON.stringify(conversation).slice(0, -1)},"schema":${schema}}`;
+    const thinkingProvider = new FakeThinkingProvider();
+    const { app } = createTestApp({ thinkingProvider });
+    const res = await (await browser(app)).post('/api/dev/thinking/json', body);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({ code: 'VALIDATION_ERROR', details: [{ path: 'body.schema' }] });
+    expect(thinkingProvider.requests).toHaveLength(0);
   });
 });
 

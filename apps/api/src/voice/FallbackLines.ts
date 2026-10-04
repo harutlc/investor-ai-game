@@ -15,6 +15,8 @@ export class FallbackLines {
         return `I can do ${offer}. That's my offer.`;
       case 'accept':
         return `You have a deal: ${offer}.`;
+      case 'closing':
+        return `Deal. ${offer} it is.`;
       case 'reject':
         return `No. My offer stands: ${offer}.`;
       case 'dismiss':

@@ -1,6 +1,7 @@
 import type { OfferInput } from '@investor/shared';
 import type { Logger } from 'pino';
 import type { InvestorAction } from '../game/InvestorAction.js';
+import type { ClosingGenerator } from './ClosingGenerator.js';
 import type { InvestorDialogueGenerator } from './InvestorDialogueGenerator.js';
 import type { VoiceLine } from './LineWriter.js';
 import type { OpeningGenerator } from './OpeningGenerator.js';
@@ -21,6 +22,7 @@ export interface VoiceTurn {
 export class InvestorVoice {
   constructor(
     private readonly opening: OpeningGenerator,
+    private readonly closing: ClosingGenerator,
     private readonly dialogue: InvestorDialogueGenerator,
     private readonly playerOptions: PlayerOptionsGenerator,
     private readonly logger: Logger,
@@ -34,6 +36,13 @@ export class InvestorVoice {
     ]);
     this.logFallbacks('opening', line, options);
     return { line, options };
+  }
+
+  /** The investor's closing line when the player accepts its offer; the game is over, so no options. */
+  async close(context: VoiceContext, offer: OfferInput): Promise<VoiceTurn> {
+    const line = await this.closing.write(context, offer);
+    this.logFallbacks('closing', line, null);
+    return { line, options: null };
   }
 
   /** The reply to a policy action, plus options for the player's next turn unless the game is over. */

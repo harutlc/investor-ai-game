@@ -10,6 +10,7 @@ const LINE_INSTRUCTIONS: Record<LineSubject['kind'], string> = {
   opening: 'Greet the founder briefly and make your opening offer.',
   counter: "Make this counter-offer in response to the founder's latest move.",
   accept: "Accept the founder's offer and close the deal.",
+  closing: 'The founder has accepted your offer. Confirm the deal on your offer and close the negotiation.',
   reject: "Turn down the founder's latest move and hold your current offer.",
   clarify:
     'You are not sure what the founder is proposing. Ask them to state their position clearly. Do not make or change any offer.',

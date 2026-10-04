@@ -42,6 +42,7 @@ import { PersonaCatalog } from '../personas/PersonaCatalog.js';
 import { PlayerRepository } from '../repositories/PlayerRepository.js';
 import { HealthService } from '../services/HealthService.js';
 import { PlayerService, type Clock } from '../services/PlayerService.js';
+import { ClosingGenerator } from '../voice/ClosingGenerator.js';
 import { FallbackLines } from '../voice/FallbackLines.js';
 import { InvestorDialogueGenerator } from '../voice/InvestorDialogueGenerator.js';
 import { InvestorVoice } from '../voice/InvestorVoice.js';
@@ -168,6 +169,7 @@ export class Container {
     );
     this.investorVoice = new InvestorVoice(
       new OpeningGenerator(lineWriter),
+      new ClosingGenerator(lineWriter),
       new InvestorDialogueGenerator(lineWriter),
       new PlayerOptionsGenerator(this.thinkingProvider, prompts, numbersInPlay, checker),
       this.logger,

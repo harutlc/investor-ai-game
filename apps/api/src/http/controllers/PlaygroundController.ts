@@ -80,8 +80,10 @@ export class PlaygroundController implements Controller {
     }
   }
 
+  /** Stops descending past the depth limit, so a deeply nested body cannot overflow the stack. */
   private static measure(node: unknown, depth = 1): { depth: number; properties: number } {
     if (node === null || typeof node !== 'object') return { depth: depth - 1, properties: 0 };
+    if (depth > MAX_SCHEMA_DEPTH) return { depth, properties: 0 };
     let maxDepth = depth;
     let properties = 0;
     const record = node as Record<string, unknown>;

@@ -192,11 +192,7 @@ export class GameEngine {
       };
     }
     if (move.playerMove === 'accept') {
-      const { line } = await this.deps.voice.respond(
-        context,
-        { kind: 'accept', offer: currentOffer },
-        { nextTurn: turn + 1 },
-      );
+      const { line } = await this.deps.voice.close(context, currentOffer);
       return {
         ...kept,
         status: 'deal',

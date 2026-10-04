@@ -16,6 +16,7 @@ const subjects: LineSubject[] = [
   { kind: 'opening', offer: OPENING },
   { kind: 'counter', offer: counterOffer },
   { kind: 'accept', offer: { investment: 500_000, equity: 22.5 } },
+  { kind: 'closing', offer: counterOffer },
   { kind: 'reject', offer: OPENING },
   { kind: 'dismiss', offer: OPENING },
   { kind: 'clarify', offer: OPENING },
@@ -36,6 +37,10 @@ describe('FallbackLines', () => {
     expect(lines.line({ kind: 'counter', offer: counterOffer })).toBe(
       "I can do €550k for 24%. That's my offer.",
     );
+  });
+
+  it("states the accepted offer when closing a player's accept", () => {
+    expect(lines.line({ kind: 'closing', offer: counterOffer })).toBe('Deal. €550k for 24% it is.');
   });
 
   it('states no numbers when walking away or asking to clarify', () => {
