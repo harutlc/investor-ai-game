@@ -1,0 +1,12 @@
+# Optional: shared remote state for teams. Copy to backend.tf, create the bucket first, then run
+# `terraform init -migrate-state`. Without it, state stays in local terraform.tfstate (git-ignored).
+
+terraform {
+  backend "s3" {
+    bucket       = "my-terraform-state-bucket"
+    key          = "investor-game/prod/terraform.tfstate"
+    region       = "eu-central-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}
