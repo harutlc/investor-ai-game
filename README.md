@@ -1,6 +1,6 @@
 # Investor Negotiation Game
 
-The player pitches a startup to an AI investor and negotiates the deal. The game design and roadmap are in [`TASKS.md`](./TASKS.md); the homework brief is in [`homework-en.md`](./homework-en.md).
+The player pitches a startup to an AI investor and negotiates the deal. For a plain-language description of the product, read the [`PRD.md`](./PRD.md). The game design and roadmap are in [`TASKS.md`](./TASKS.md); the homework brief is in [`homework-en.md`](./homework-en.md).
 
 This README covers what exists so far: the monorepo, the Express API with its security baseline, the LLM provider layer, the game (brain, policy, voice, engine, HTTP API) and the web UI.
 
