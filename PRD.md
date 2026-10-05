@@ -251,7 +251,7 @@ These ideas are part of the longer-term game design. None of them is in the curr
 
 ### How it works
 
-The brain is a "decision" AI that answers typed questions with a confidence, either Jev (hosted, from TypeSafe) or Laya (a free alternative that runs locally). The voice is a regular text AI: Ollama running locally, or Claude from Anthropic. All the numbers and rules live in the game's own code. The technical details are in [`README.md`](README.md) and in the specifications under [`openspec/specs/`](openspec/specs/).
+The brain is a "decision" AI that answers typed questions with a confidence, either Jev (hosted, from TypeSafe) or Laya (a free alternative that runs locally). The voice is a regular text AI: Ollama running locally, or Claude from Anthropic. All the numbers and rules live in the game's own code. [`LLM.md`](LLM.md) explains the role of each AI in detail. The technical details are in [`README.md`](README.md) and in the specifications under [`openspec/specs/`](openspec/specs/).
 
 ### Sources
 

@@ -1,6 +1,6 @@
 # Investor Negotiation Game
 
-The player pitches a startup to an AI investor and negotiates the deal. For a plain-language description of the product, read the [`PRD.md`](./PRD.md). The game design and roadmap are in [`TASKS.md`](./TASKS.md); the homework brief is in [`homework-en.md`](./homework-en.md).
+The player pitches a startup to an AI investor and negotiates the deal. For a plain-language description of the product, read the [`PRD.md`](./PRD.md); for the roles of the two LLMs (decision and thinking), read [`LLM.md`](./LLM.md). The game design and roadmap are in [`TASKS.md`](./TASKS.md); the homework brief is in [`homework-en.md`](./homework-en.md).
 
 This README covers what exists so far: the monorepo, the Express API with its security baseline, the LLM provider layer, the game (brain, policy, voice, engine, HTTP API) and the web UI.
 
@@ -179,7 +179,7 @@ Game settings live in the `game` section and have no environment overrides:
 
 ## LLM providers
 
-The investor uses two kinds of model:
+The investor uses two kinds of model. [`LLM.md`](./LLM.md) explains their roles in detail; this section covers setup.
 
 - **The decision LLM is the brain.** Jev or Laya returns typed judgments: `choice` (one option), `noul` (probability of yes) and `score` (a position on ordered levels). Code then decides what the investor does.
 - **The thinking LLM is the voice.** Ollama or Anthropic writes the investor's replies and the player's options, as text or as JSON that matches a schema.
@@ -195,7 +195,7 @@ Startup fails only on bad configuration, for example an unknown provider or a mi
 ### Ollama (thinking, local)
 
 ```bash
-ollama pull llama3.1:8b   # the model set in llm.thinking.providers.ollama.model
+ollama pull qwen2.5:3b    # the model set in llm.thinking.providers.ollama.model
 ollama serve              # http://localhost:11434 (override with OLLAMA_BASE_URL)
 ```
 
