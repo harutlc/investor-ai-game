@@ -16,7 +16,8 @@ The repository SHALL contain Terraform configuration that provisions everything 
 
 The configuration MUST be parameterized by at least:
 - the AWS region;
-- the domain name;
+- the UI domain name;
+- the API domain name;
 - the instance type;
 - the data volume size;
 - an optional Route 53 hosted zone.
@@ -39,12 +40,16 @@ Destroying the stack MUST NOT delete the data volume's snapshots.
 
 #### Scenario: Optional DNS
 - **WHEN** a Route 53 hosted zone ID is provided
-- **THEN** an `A` record for the domain pointing at the instance's public IP is created
+- **THEN** `A` records for the UI domain and the API domain, both pointing at the instance's public IP, are created
 - **WHEN** no hosted zone ID is provided
-- **THEN** no DNS record is created, and the outputs show the IP the operator must point the domain at
+- **THEN** no DNS record is created, and the outputs show the IP the operator must point both domains at
 
 ### Requirement: Public HTTPS with a trusted certificate
-The deployment SHALL serve the game only over HTTPS on the configured domain, with a certificate that browsers trust. It MUST meet these rules:
+The deployment SHALL serve the game only over HTTPS on the configured domains, each with a certificate that browsers trust:
+- the UI domain serves the web UI and its same-origin `/api`;
+- the API domain serves only `/api/*`, for direct API clients, and redirects every other path to the UI domain.
+
+It MUST meet these rules:
 - Plain HTTP requests MUST be redirected to HTTPS.
 - Certificates MUST be obtained and renewed automatically.
 - Only ports 80 and 443 MUST be reachable from the internet. The `web` (8080) and `api` (3001) ports and SSH MUST NOT be.
@@ -57,6 +62,12 @@ The deployment SHALL serve the game only over HTTPS on the configured domain, wi
 #### Scenario: HTTP redirects
 - **WHEN** a client requests `http://<domain>/games/abc`
 - **THEN** the response is a permanent redirect to `https://<domain>/games/abc`
+
+#### Scenario: API host serves only the API
+- **WHEN** a client requests `https://<api_domain>/api/health`
+- **THEN** it receives the API's health response over a valid certificate
+- **WHEN** a client requests `https://<api_domain>/games/abc`
+- **THEN** the response redirects to `https://<domain>/games/abc`
 
 #### Scenario: Internal ports closed
 - **WHEN** a client outside AWS connects to the instance's public IP on port 22, 3001 or 8080
@@ -83,6 +94,10 @@ The web image MUST be built with a CSRF setting that matches the API's.
 - **WHEN** two clients with different public IPs send requests to the deployed game
 - **THEN** the API counts their requests against separate rate-limit buckets
 
+#### Scenario: Same client IP on either host
+- **WHEN** one client sends API requests through both the UI domain and the API domain
+- **THEN** the API resolves the same client IP for both, because both paths cross the same proxy hops
+
 #### Scenario: Slow turn is not cut off
 - **WHEN** a turn request takes 90 seconds because the thinking provider is slow
 - **THEN** the client receives the API's response, not a gateway timeout
@@ -94,7 +109,9 @@ Secrets SHALL be stored only as encrypted SSM Parameter Store parameters under t
 - `TYPESAFE_API_KEY`;
 - `CSRF_SECRET`, when CSRF is enabled.
 
-Secret values MUST NOT appear in any of these places:
+Optional settings that are not secret MAY be stored as plain `String` parameters under the same prefix: `CSRF_ENABLED`, and the Sentry DSNs `SENTRY_DSN` (API) and `SENTRY_WEB_DSN` (web build). The Sentry auth token used to upload source maps is a secret. It stays in the operator's environment, never in SSM or the repository.
+
+Secret values, including the Sentry auth token, MUST NOT appear in any of these places:
 - the repository;
 - Terraform configuration or state;
 - EC2 user data;

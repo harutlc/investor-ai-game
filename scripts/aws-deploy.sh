@@ -118,7 +118,7 @@ else
       -t "$registry/investor-game/api:$tag" --push .
     sentry_secret=()
     if [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then
-      sentry_secret=(--secret id=sentry_auth_token,env=SENTRY_AUTH_TOKEN)
+      sentry_secret=(--secret "id=sentry_auth_token,env=SENTRY_AUTH_TOKEN")
     else
       echo "SENTRY_AUTH_TOKEN is not set: web source maps will not be uploaded to Sentry" >&2
     fi
