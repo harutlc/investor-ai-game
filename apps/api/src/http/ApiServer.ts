@@ -1,4 +1,5 @@
 import type { IncomingMessage, Server } from 'node:http';
+import * as Sentry from '@sentry/node';
 import cookieParser from 'cookie-parser';
 import express, { Router, type Express, type Request } from 'express';
 import type { Logger } from 'pino';
@@ -78,6 +79,8 @@ export class ApiServer {
     app.use(API_PREFIX, api);
 
     app.use(new NotFoundMiddleware().handle);
+    // Reports 5xx errors (AppErrors carry their own 4xx status and are skipped), then passes them on.
+    Sentry.setupExpressErrorHandler(app);
     app.use(new ErrorHandlerMiddleware(logger, config.isProduction).handle);
     return app;
   }

@@ -8,6 +8,8 @@
 # Needs: terraform (state for infra/aws), AWS CLI v2, Docker with buildx, git, python3, curl.
 # CSRF follows the optional SSM parameter <ssm_prefix>CSRF_ENABLED, which sets both the web build
 # (VITE_CSRF_ENABLED) and the API, so the two cannot drift apart.
+# Sentry (optional): SSM <ssm_prefix>SENTRY_DSN reaches the API, <ssm_prefix>SENTRY_WEB_DSN is baked into the
+# web build, both tagged with the image tag as release. SENTRY_AUTH_TOKEN in this shell uploads web source maps.
 
 set -euo pipefail
 
@@ -76,6 +78,11 @@ if has_param CSRF_ENABLED; then
   csrf_enabled=$(awsr ssm get-parameter --name "${ssm_prefix}CSRF_ENABLED" --with-decryption \
     --query Parameter.Value --output text)
 fi
+sentry_web_dsn=""
+if has_param SENTRY_WEB_DSN; then
+  sentry_web_dsn=$(awsr ssm get-parameter --name "${ssm_prefix}SENTRY_WEB_DSN" --with-decryption \
+    --query Parameter.Value --output text)
+fi
 required=(COOKIE_SECRET ANTHROPIC_API_KEY TYPESAFE_API_KEY)
 [ "$csrf_enabled" = "true" ] && required+=(CSRF_SECRET)
 for name in "${required[@]}"; do
@@ -108,8 +115,15 @@ else
     awsr ecr get-login-password | docker login --username AWS --password-stdin "$registry"
     docker buildx build --platform "$platform" --target api \
       -t "$registry/investor-game/api:$tag" --push .
+    sentry_secret=()
+    if [ -n "${SENTRY_AUTH_TOKEN:-}" ]; then
+      sentry_secret=(--secret id=sentry_auth_token,env=SENTRY_AUTH_TOKEN)
+    else
+      echo "SENTRY_AUTH_TOKEN is not set: web source maps will not be uploaded to Sentry" >&2
+    fi
     docker buildx build --platform "$platform" --target web --build-arg "VITE_CSRF_ENABLED=$csrf_enabled" \
-      -t "$registry/investor-game/web:$tag" --push .
+      --build-arg "VITE_SENTRY_DSN=$sentry_web_dsn" --build-arg "VITE_SENTRY_RELEASE=$tag" \
+      ${sentry_secret[@]+"${sentry_secret[@]}"} -t "$registry/investor-game/web:$tag" --push .
   fi
 fi
 

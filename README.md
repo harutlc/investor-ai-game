@@ -163,6 +163,15 @@ aws ssm put-parameter --region "$REGION" --type SecureString --name "${PREFIX}CS
 
 The deploy script bakes this setting into the web image and passes the same value to the API, so the two always match. Because the web image is built with the setting, an older tag built with the opposite value will not match. After changing it, push a new commit and deploy that; don't roll back across the change.
 
+**Sentry (optional).** Errors and traces go to the `harut-46` org: project `investor-api` for the API and `investor-web` for the UI. Each project's DSN is in its Client Keys settings. Add the two DSNs as parameters, then deploy a fresh build:
+
+```bash
+aws ssm put-parameter --region "$REGION" --type String --name "${PREFIX}SENTRY_DSN" --value 'https://...investor-api DSN'
+aws ssm put-parameter --region "$REGION" --type String --name "${PREFIX}SENTRY_WEB_DSN" --value 'https://...investor-web DSN'
+```
+
+The API reads `SENTRY_DSN` at runtime. The web DSN is baked into the web image, the same way the CSRF setting is. Both report the image tag as their release. To make production stack traces from the UI readable, export `SENTRY_AUTH_TOKEN` (an org token with the `project:releases` scope) before you run `scripts/aws-deploy.sh`. The web build then uploads hidden source maps for that release and deletes them from the image. The token is passed as a BuildKit secret, so it never ends up in an image layer. Locally, set `SENTRY_DSN` in `.env` and `VITE_SENTRY_DSN` in `apps/web/.env.local`. If they are unset, the SDKs stay off.
+
 ### Redeploy, roll back, rotate secrets
 
 ```bash

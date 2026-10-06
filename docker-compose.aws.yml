@@ -25,6 +25,8 @@ services:
       DECISION_PROVIDER: jev
       # Must match VITE_CSRF_ENABLED baked into the web image; the deploy sets both from one value.
       CSRF_ENABLED: ${CSRF_ENABLED:-}
+      # SENTRY_DSN comes from SSM via .env; the release matches the web build's, so both tie to one deploy.
+      SENTRY_RELEASE: ${IMAGE_TAG:?}
     volumes:
       - /srv/investor/data:/app/data
     init: true

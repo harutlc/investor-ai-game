@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { ConfigError } from './config/ConfigError.js';
 import { ConfigLoader } from './config/ConfigLoader.js';
 import { WorkspaceRoot } from './config/WorkspaceRoot.js';
@@ -20,13 +21,15 @@ async function main(): Promise<void> {
   const container = new Container(config);
   const { logger, server } = container;
 
+  // Sentry's own handlers capture these; flush before exiting so the event is not lost.
+  const exitAfterFlush = () => void Sentry.flush(2000).finally(() => process.exit(1));
   process.on('unhandledRejection', (reason) => {
     logger.fatal({ err: reason }, 'unhandled promise rejection');
-    process.exit(1);
+    exitAfterFlush();
   });
   process.on('uncaughtException', (error) => {
     logger.fatal({ err: error }, 'uncaught exception');
-    process.exit(1);
+    exitAfterFlush();
   });
 
   let shuttingDown = false;
@@ -56,5 +59,6 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   console.error(error);
-  process.exit(1);
+  Sentry.captureException(error);
+  void Sentry.flush(2000).finally(() => process.exit(1));
 });

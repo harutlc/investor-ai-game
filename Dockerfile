@@ -40,7 +40,12 @@ FROM build AS build-web
 # Must match the API's CSRF_ENABLED (compose passes the same .env value).
 ARG VITE_CSRF_ENABLED=
 ENV VITE_CSRF_ENABLED=${VITE_CSRF_ENABLED}
-RUN pnpm build:web
+# Sentry: the DSN is public (it is in the bundle anyway); the release is the image tag. The auth token is a
+# BuildKit secret so it never lands in a layer; without it the build skips the source-map upload.
+ARG VITE_SENTRY_DSN=
+ARG VITE_SENTRY_RELEASE=
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN} VITE_SENTRY_RELEASE=${VITE_SENTRY_RELEASE}
+RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN pnpm build:web
 
 # --- api ---------------------------------------------------------------------------------------------
 FROM base AS api
@@ -56,7 +61,8 @@ COPY apps/api/src/db/migrations ./apps/api/src/db/migrations
 RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3001
-CMD ["node", "apps/api/dist/main.js"]
+# --enable-source-maps: stack traces (and so Sentry frames) point at the TypeScript sources.
+CMD ["node", "--enable-source-maps", "--import", "./apps/api/dist/instrument.js", "apps/api/dist/main.js"]
 
 # --- web ---------------------------------------------------------------------------------------------
 FROM nginxinc/nginx-unprivileged:stable-alpine AS web
