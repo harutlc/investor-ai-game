@@ -65,6 +65,16 @@ const ThinkingConfigSchema = z
   })
   .strict();
 
+/** USD per million tokens, per token category. */
+const ModelPriceSchema = z
+  .object({
+    inputPerMTok: z.number().nonnegative(),
+    outputPerMTok: z.number().nonnegative(),
+    cacheReadPerMTok: z.number().nonnegative(),
+    cacheWritePerMTok: z.number().nonnegative(),
+  })
+  .strict();
+
 const systemOneProvider = z.object({ baseUrl: httpUrl, model, ...transport }).strict();
 
 const DecisionConfigSchema = z
@@ -189,7 +199,10 @@ export const AppConfigSchema = z
       .strict(),
     logging: z
       .object({
-        level: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']),
+        /** Unset: `debug` in development, `info` otherwise. */
+        level: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).optional(),
+        /** Log full LLM prompts and responses. Debugging only. */
+        llmContent: z.boolean({ error: 'must be true or false' }).default(false),
       })
       .strict(),
     llm: z
@@ -198,6 +211,8 @@ export const AppConfigSchema = z
         decision: DecisionConfigSchema,
         /** How long provider reachability results are cached for /api/health. */
         healthCacheMs: z.number().int().min(0),
+        /** Prices by model id, for the estimated cost on LLM log lines. */
+        pricing: z.record(z.string().min(1), ModelPriceSchema).default({}),
       })
       .strict(),
     game: GameConfigSchema,
@@ -263,7 +278,14 @@ export const AppConfigSchema = z
         }
       }
     }
-  });
+  })
+  .transform((config) => ({
+    ...config,
+    logging: {
+      ...config.logging,
+      level: config.logging.level ?? (config.nodeEnv === 'development' ? 'debug' : 'info'),
+    },
+  }));
 
 export type AppConfigInput = z.input<typeof AppConfigSchema>;
 export type ParsedAppConfig = z.output<typeof AppConfigSchema>;

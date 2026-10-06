@@ -33,6 +33,8 @@ import { DecisionProviderFactory } from '../llm/decision/DecisionProviderFactory
 import { ProviderHealthMonitor } from '../llm/ProviderHealthMonitor.js';
 import type { ThinkingProvider } from '../llm/thinking/ThinkingProvider.js';
 import { ThinkingProviderFactory } from '../llm/thinking/ThinkingProviderFactory.js';
+import { LlmCallLogger } from '../logging/LlmCallLogger.js';
+import { LlmPricing } from '../logging/LlmPricing.js';
 import { LoggerFactory } from '../logging/LoggerFactory.js';
 import { DecisionLogRepository } from '../repositories/DecisionLogRepository.js';
 import { GameSessionRepository } from '../repositories/GameSessionRepository.js';
@@ -72,6 +74,8 @@ export interface ContainerOverrides {
  */
 export class Container {
   readonly logger: Logger;
+  /** Usage, cost, retries and failures of every LLM call, through `logger`. */
+  readonly llmCalls: LlmCallLogger;
   readonly database: Database;
   readonly playerRepository: PlayerRepository;
   readonly gameSessionRepository: GameSessionRepository;
@@ -121,7 +125,16 @@ export class Container {
     this.offerRepository = new OfferRepository(this.database.db);
     this.decisionLogRepository = new DecisionLogRepository(this.database.db);
 
-    const providerDeps = { logger: this.logger, ...(overrides.fetch ? { fetch: overrides.fetch } : {}) };
+    this.llmCalls = new LlmCallLogger({
+      logger: this.logger,
+      pricing: new LlmPricing(config.llm.pricing, this.logger),
+      logContent: config.logging.llmContent,
+    });
+    const providerDeps = {
+      logger: this.logger,
+      llmCalls: this.llmCalls,
+      ...(overrides.fetch ? { fetch: overrides.fetch } : {}),
+    };
     this.thinkingProvider =
       overrides.thinkingProvider ?? ThinkingProviderFactory.create(config, providerDeps);
     this.decisionProvider =

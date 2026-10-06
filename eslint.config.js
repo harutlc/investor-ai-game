@@ -37,6 +37,11 @@ export default tseslint.config(
     },
   },
   {
+    // The API logs through its pino logger only (redaction, request ids, Sentry).
+    files: ['apps/api/src/**/*.ts'],
+    rules: { 'no-console': 'error' },
+  },
+  {
     // The web app runs in the browser: DOM globals, the rules of hooks, and Vite fast-refresh boundaries.
     files: ['apps/web/**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },

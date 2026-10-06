@@ -1,5 +1,4 @@
 import type { IncomingMessage, Server } from 'node:http';
-import * as Sentry from '@sentry/node';
 import cookieParser from 'cookie-parser';
 import express, { Router, type Express, type Request } from 'express';
 import type { Logger } from 'pino';
@@ -14,6 +13,7 @@ import { JsonContentTypeGuard } from './middleware/JsonContentTypeGuard.js';
 import { NotFoundMiddleware } from './middleware/NotFoundMiddleware.js';
 import type { PlayerSessionMiddleware } from './middleware/PlayerSessionMiddleware.js';
 import { RateLimiters } from './middleware/RateLimiters.js';
+import { RequestContextMiddleware } from './middleware/RequestContextMiddleware.js';
 import { RequestIdMiddleware } from './middleware/RequestIdMiddleware.js';
 import { SecurityHeaders } from './middleware/SecurityHeaders.js';
 
@@ -53,12 +53,14 @@ export class ApiServer {
     app.set('trust proxy', config.server.trustProxy);
 
     app.use(new RequestIdMiddleware().handle);
+    app.use(new RequestContextMiddleware().handle);
     app.use(
       pinoHttp({
         logger,
         genReqId: (req: IncomingMessage) => (req as Request).requestId,
-        customLogLevel: (_req, res, error) =>
-          error || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
+        // At most warn: the error handler logs the failure itself at `error`, which is what becomes the Sentry
+        // event. An `error` request line would add a second event for the same failure.
+        customLogLevel: (_req, res, error) => (error || res.statusCode >= 400 ? 'warn' : 'info'),
       }),
     );
     app.use(SecurityHeaders.create(config.isProduction));
@@ -79,8 +81,6 @@ export class ApiServer {
     app.use(API_PREFIX, api);
 
     app.use(new NotFoundMiddleware().handle);
-    // Reports 5xx errors (AppErrors carry their own 4xx status and are skipped), then passes them on.
-    Sentry.setupExpressErrorHandler(app);
     app.use(new ErrorHandlerMiddleware(logger, config.isProduction).handle);
     return app;
   }

@@ -15,6 +15,7 @@ type Overrides = {
   rateLimit?: Partial<MutableConfig['security']['rateLimit']>;
   sessionMaxAgeDays?: number;
   logLevel?: AppConfig['logging']['level'];
+  llmContent?: boolean;
 };
 
 export const TEST_COOKIE_SECRET = 'test-cookie-secret-0123456789abcdef0123';
@@ -36,7 +37,7 @@ export function testConfig(overrides: Overrides = {}): AppConfig {
       csrf: { enabled: overrides.csrf ?? true },
     },
     database: { file: ':memory:' },
-    logging: { level: overrides.logLevel ?? 'silent' },
+    logging: { level: overrides.logLevel ?? 'silent', llmContent: overrides.llmContent ?? false },
     llm: {
       thinking: {
         provider: 'fake',
@@ -70,6 +71,20 @@ export function testConfig(overrides: Overrides = {}): AppConfig {
         },
       },
       healthCacheMs: 30_000,
+      pricing: {
+        'claude-opus-5-5': {
+          inputPerMTok: 4,
+          outputPerMTok: 20,
+          cacheReadPerMTok: 0.2,
+          cacheWritePerMTok: 5,
+        },
+        'claude-haiku-4-5': {
+          inputPerMTok: 1,
+          outputPerMTok: 5,
+          cacheReadPerMTok: 0.1,
+          cacheWritePerMTok: 1.25,
+        },
+      },
     },
     game: {
       currency: 'EUR',

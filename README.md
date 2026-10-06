@@ -112,6 +112,7 @@ What's created and where:
 - **Limits.** There is one instance and one API replica, as SQLite requires. A deploy restarts the containers, which causes roughly 10–20 s of 502s.
 
 **Cost.** Roughly $15–25/month, plus LLM usage:
+
 - t4g.small: about $12;
 - 20 GB root and 10 GB data gp3: about $2.50;
 - public IPv4: about $3.60;
@@ -203,6 +204,7 @@ docker compose logs --tail 200 api          # also: web, caddy
 ```
 
 On the instance, the paths are:
+
 - `/opt/investor`: the stack's files, including a root-only `.env`;
 - `/srv/investor/data`: the database;
 - `/srv/investor/caddy`: the certificates;
@@ -220,6 +222,7 @@ On the instance, the paths are:
    terraform -chdir=infra/aws import aws_volume_attachment.data /dev/sdf:vol-NEW:$INSTANCE
    terraform -chdir=infra/aws apply
    ```
+
 4. Delete the old volume when you no longer need it.
 
 **Replace the instance**, for example to pick up a newer AMI or an edited `cloud-init.yaml`, with `terraform -chdir=infra/aws apply -replace=aws_instance.app`, then `scripts/aws-deploy.sh --tag <current tag>`. The data volume and the Elastic IP are kept.
@@ -302,7 +305,8 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 | `TRUST_PROXY`       | `server.trustProxy` (`false`, a hop count or a comma list; not `true`) |
 | `CORS_ORIGINS`      | `cors.origins` (a comma-separated list of exact origins; no `*`)       |
 | `DATABASE_FILE`     | `database.file` (relative to the repo root, or `:memory:`)             |
-| `LOG_LEVEL`         | `logging.level`                                                        |
+| `LOG_LEVEL`         | `logging.level` (unset: `debug` in development, `info` otherwise)      |
+| `LOG_LLM_CONTENT`   | `logging.llmContent` (`true` logs LLM prompts/responses; debug only)   |
 | `APP_CONFIG_PATH`   | Path to an alternative config file                                     |
 | `THINKING_PROVIDER` | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)              |
 | `DECISION_PROVIDER` | `llm.decision.provider` (`laya`, `jev` or `fake`)                      |
@@ -312,7 +316,29 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 | `TYPESAFE_API_KEY`  | Required when the decision provider is `jev`                           |
 | `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one       |
 
-Invalid configuration stops startup with a list of every problem. Secret values are never printed.
+Invalid configuration stops startup with a list of every problem, written as a `fatal` log line. Secret values are never printed.
+
+## Logging
+
+The API logs structured JSON to stdout (pretty-printed in development) through one pino logger, built by `LoggerFactory` and injected everywhere; `console` is not used (lint enforces it).
+
+- **Level:** `LOG_LEVEL`, else `debug` in development and `info` otherwise.
+- **Request id:** every line written while a request is handled carries `requestId` (the `X-Request-Id` value), including lines from providers, the brain and repositories, via `AsyncLocalStorage`.
+- **Redaction:** `Cookie`, `Set-Cookie`, `Authorization`, `X-CSRF-Token` and `X-Api-Key` headers, and fields named `password`, `token`, `accessToken`, `refreshToken`, `secret`, `apiKey`, `api_key` or `authorization` (top level or one level down) are logged as `[Redacted]`. Don't log config or secrets objects.
+- **Sentry:** with `SENTRY_DSN` set, `info`/`warn`/`error` lines also go to Sentry Logs (health-probe request lines excepted), and `error`/`fatal` lines become Sentry error events, tagged `request_id`. Errors reach Sentry only through the logger, so a failure is reported once. SDK v11 has Sentry Logs on by default (there is no `enableLogs` option); see `apps/api/src/monitoring/SentryOptions.ts`.
+
+**LLM calls.** Every Anthropic call is logged by `LlmCallLogger`, so call sites log nothing themselves. Each line has `provider`, `operation` (`generate` or `ping`), `model` and, inside a request, `requestId`.
+
+| Event (`event` / message) | Level | Fields                                                                                                                                                                                                                                    |
+| ------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm.call`                | info  | `maxTokens`, `temperature`, `effort`, `fallbacks`, `usage` (input, output, cache read/write, total tokens), `costUsd`, `latencyMs`, `attempts`, `stopReason`, `anthropicRequestId`, `requestedModel` after a fallback. Pings log at debug |
+| `llm.rate_limited`        | warn  | A 429 on one attempt: `attempt`, `retryAfterSeconds`, `retryAfterMs`, `anthropicRequestId`                                                                                                                                                |
+| `llm.overloaded`          | warn  | A 529 on one attempt, same fields                                                                                                                                                                                                         |
+| `llm.retry`               | warn  | `attempt` about to start and `reason` (`status_429`, `timeout`, `connection`, `invalid_json`, …)                                                                                                                                          |
+| `llm.timeout`             | warn  | `attempt`, `timeoutMs`                                                                                                                                                                                                                    |
+| `llm.call_failed`         | error | After all retries: `errorType` (SDK error class, or `Refusal` with `category`), `status`, `attempts`, `latencyMs`, `err`. Becomes a Sentry error event                                                                                    |
+
+`costUsd` is an estimate from the `llm.pricing` table in `config/app.config.json` (USD per million tokens, per model); an unpriced model logs `costUsd: null` and one warning. `LOG_LLM_CONTENT=true` adds `prompt` and `response` to these lines. They hold players' text, so use it for local debugging only; Sentry drops them in production anyway.
 
 Game settings live in the `game` section and have no environment overrides:
 
@@ -580,7 +606,7 @@ npx newman run postman/investor-api.postman_collection.json -e postman/local.pos
 | CSRF            | **Off by default** (`security.csrf.enabled` / `CSRF_ENABLED`). When on: a signed double-submit token (`csrf-csrf`), HMAC-bound to the player ID, required on POST/PUT/PATCH/DELETE. When off, cross-site writes are still blocked by `SameSite=Lax` cookies, JSON-only bodies and the CORS allowlist |
 | Input           | Only `application/json` bodies on POST/PUT/PATCH, a 100 KB body limit, and strict zod validation that rejects unknown fields                                                                                                                                                                         |
 | Abuse           | Per-IP rate limits: a global limit, plus a stricter one for mutating requests. `X-Forwarded-For` is trusted only when `server.trustProxy` is configured                                                                                                                                              |
-| Errors and logs | No stack traces or internal messages in production responses. Cookies, authorization and CSRF headers are redacted from logs                                                                                                                                                                         |
+| Errors and logs | No stack traces or internal messages in production responses. Cookies, authorization, CSRF and API-key headers, and secret-named fields, are redacted from logs (see Logging)                                                                                                                        |
 
 ### Contract for the web client
 

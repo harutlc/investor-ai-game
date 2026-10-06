@@ -5,6 +5,7 @@ import { AppError } from '../../errors/AppError.js';
 import { InvalidJsonError } from '../../errors/InvalidJsonError.js';
 import { PayloadTooLargeError } from '../../errors/PayloadTooLargeError.js';
 import { UnsupportedMediaTypeError } from '../../errors/UnsupportedMediaTypeError.js';
+import { ReportedErrors } from '../../monitoring/ReportedErrors.js';
 
 /** Errors raised by the JSON body parser carry a `type`. */
 interface BodyParserError {
@@ -31,13 +32,17 @@ export class ErrorHandlerMiddleware {
     const appError = this.toAppError(error);
     // pino-http attaches a request-scoped logger (with the request id); fall back when it is not mounted.
     const log = (req as { log?: Logger }).log ?? this.logger;
-    if (appError) {
+    // `error` lines become Sentry events (pinoIntegration): unexpected errors and server-side AppErrors,
+    // unless the code that failed already reported the cause (e.g. an LLM call). Client errors stay at warn.
+    if (!appError) {
+      log.error({ err: error }, 'unhandled error');
+    } else if (appError.status >= 500 && !ReportedErrors.has(appError)) {
+      log.error({ err: appError }, 'request failed');
+    } else {
       log.warn(
         { err: { name: appError.name, code: appError.code, message: appError.message } },
         'request failed',
       );
-    } else {
-      log.error({ err: error }, 'unhandled error');
     }
 
     const status = appError?.status ?? 500;

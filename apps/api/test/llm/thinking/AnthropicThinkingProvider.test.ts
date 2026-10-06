@@ -1,8 +1,20 @@
+import { Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { AnthropicThinkingProvider } from '../../../src/llm/thinking/AnthropicThinkingProvider.js';
+import { LlmCallLogger } from '../../../src/logging/LlmCallLogger.js';
+import { LlmPricing } from '../../../src/logging/LlmPricing.js';
+import { LoggerFactory } from '../../../src/logging/LoggerFactory.js';
+import { RequestContext } from '../../../src/logging/RequestContext.js';
+import { ReportedErrors } from '../../../src/monitoring/ReportedErrors.js';
 import { captureLogger } from '../../support/silentLogger.js';
-import { connectionRefused, jsonResponse, stubFetch, type RecordedRequest } from '../../support/stubFetch.js';
+import {
+  connectionRefused,
+  hang,
+  jsonResponse,
+  stubFetch,
+  type RecordedRequest,
+} from '../../support/stubFetch.js';
 import { testConfig } from '../../support/testConfig.js';
 
 const API_KEY = 'sk-ant-test-0123456789-never-log-me';
@@ -143,5 +155,201 @@ describe('AnthropicThinkingProvider', () => {
       jsonResponse({ type: 'error', error: { type: 'not_found_error', message: 'x' } }, 404),
     );
     await expect(bad.anthropic.ping()).rejects.toMatchObject({ code: 'PROVIDER_BAD_RESPONSE' });
+  });
+});
+
+describe('AnthropicThinkingProvider call logging', () => {
+  type Line = Record<string, unknown> & { level: number; event?: string };
+
+  function logged(
+    handler: Parameters<typeof stubFetch>[0],
+    overrides: Partial<typeof settings> = {},
+    logContent = false,
+  ) {
+    const stub = stubFetch(handler);
+    const raw: string[] = [];
+    const sink = new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        raw.push(chunk.toString());
+        done();
+      },
+    });
+    const config = testConfig({ logLevel: 'debug' });
+    const logger = LoggerFactory.create(config, sink);
+    const llmCalls = new LlmCallLogger({
+      logger,
+      pricing: new LlmPricing(config.llm.pricing, logger),
+      logContent,
+    });
+    const anthropic = new AnthropicThinkingProvider({ ...settings, ...overrides }, API_KEY, {
+      logger,
+      fetch: stub.fetch,
+      llmCalls,
+    });
+    const lines = () => raw.map((line) => JSON.parse(line) as Line);
+    const events = (name: string) => lines().filter((line) => line.event === name);
+    return { anthropic, calls: stub.calls, raw, lines, events };
+  }
+
+  const apiError = (status: number, type: string, headers: Record<string, string> = {}) =>
+    jsonResponse({ type: 'error', error: { type, message: type } }, status, {
+      'request-id': 'req_err',
+      ...headers,
+    });
+
+  it('logs a successful call once at info with usage, cost and the HTTP request id', async () => {
+    const { anthropic, events } = logged(() => text('Hello.'));
+    await RequestContext.run({ requestId: 'http-42' }, () => anthropic.generateText(ask));
+    expect(events('llm.call')).toHaveLength(1);
+    expect(events('llm.call')[0]).toMatchObject({
+      level: 30,
+      provider: 'anthropic',
+      model: 'claude-opus-5-5',
+      maxTokens: 1024,
+      temperature: null,
+      effort: 'low',
+      fallbacks: true,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        totalTokens: 15,
+      },
+      costUsd: 0.00014,
+      attempts: 1,
+      stopReason: 'end_turn',
+      anthropicRequestId: 'req_test',
+      requestId: 'http-42',
+    });
+  });
+
+  it('logs a 429 (with retry-after) and the retry, then the call with attempts: 2', async () => {
+    let n = 0;
+    const { anthropic, events } = logged(
+      () => (n++ === 0 ? apiError(429, 'rate_limit_error', { 'retry-after-ms': '5' }) : text('Hi.')),
+      { maxRetries: 2 },
+    );
+    await anthropic.generateText(ask);
+    expect(events('llm.rate_limited')).toHaveLength(1);
+    expect(events('llm.rate_limited')[0]).toMatchObject({
+      level: 40,
+      attempt: 1,
+      retryAfterMs: 5,
+      status: 429,
+    });
+    expect(events('llm.retry')[0]).toMatchObject({ level: 40, attempt: 2, reason: 'status_429' });
+    expect(events('llm.call')[0]).toMatchObject({ level: 30, attempts: 2 });
+    expect(events('llm.call_failed')).toHaveLength(0);
+  });
+
+  it('logs a 529 as llm.overloaded', async () => {
+    const { anthropic, events } = logged(() => apiError(529, 'overloaded_error'));
+    await expect(anthropic.generateText(ask)).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    expect(events('llm.overloaded')[0]).toMatchObject({ attempt: 1, status: 529, retryAfterSeconds: null });
+  });
+
+  it('logs exhausted retries as one llm.call_failed at error', async () => {
+    const { anthropic, events, calls } = logged(
+      () => apiError(429, 'rate_limit_error', { 'retry-after-ms': '1' }),
+      {
+        maxRetries: 2,
+      },
+    );
+    await expect(anthropic.generateText(ask)).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    expect(calls).toHaveLength(3);
+    expect(events('llm.rate_limited')).toHaveLength(3);
+    expect(events('llm.call_failed')).toHaveLength(1);
+    expect(events('llm.call_failed')[0]).toMatchObject({
+      level: 50,
+      errorType: 'RateLimitError',
+      status: 429,
+      attempts: 3,
+      anthropicRequestId: 'req_err',
+    });
+  });
+
+  it('logs a timed-out attempt and the retry', async () => {
+    let n = 0;
+    const { anthropic, events } = logged(
+      (_request, signal) => (n++ === 0 ? hang(signal) : text('Late but fine.')),
+      { timeoutMs: 50, maxRetries: 1 },
+    );
+    await anthropic.generateText(ask);
+    expect(events('llm.timeout')[0]).toMatchObject({ level: 40, attempt: 1, timeoutMs: 50 });
+    expect(events('llm.retry')[0]).toMatchObject({ attempt: 2, reason: 'timeout' });
+    expect(events('llm.call')[0]).toMatchObject({ attempts: 2 });
+  });
+
+  it('logs 401 as AuthenticationError and still answers PROVIDER_UNAVAILABLE', async () => {
+    const { anthropic, events, raw } = logged(() => apiError(401, 'authentication_error'));
+    await expect(anthropic.generateText(ask)).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+    expect(events('llm.call_failed')).toHaveLength(1);
+    expect(events('llm.call_failed')[0]).toMatchObject({ errorType: 'AuthenticationError', status: 401 });
+    expect(raw.join('')).not.toContain(API_KEY);
+  });
+
+  it('marks a failure as reported, so the HTTP error handler does not report it again', async () => {
+    const { anthropic } = logged(() => apiError(500, 'api_error'));
+    const error = await anthropic.generateText(ask).catch((e: unknown) => e);
+    expect(ReportedErrors.has(error)).toBe(true);
+  });
+
+  it('logs a refusal once as llm.call_failed', async () => {
+    const { anthropic, events } = logged(() =>
+      message([], 'refusal', { stop_details: { type: 'refusal', category: 'cyber', explanation: null } }),
+    );
+    const error = await anthropic.generateText(ask).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'PROVIDER_BAD_RESPONSE' });
+    expect(ReportedErrors.has(error)).toBe(true);
+    expect(events('llm.call_failed')).toHaveLength(1);
+    expect(events('llm.call_failed')[0]).toMatchObject({
+      level: 50,
+      errorType: 'Refusal',
+      category: 'cyber',
+    });
+  });
+
+  it('prices a fallback-served response at the serving model', async () => {
+    const { anthropic, events } = logged(() =>
+      message([{ type: 'text', text: 'Fine.' }], 'end_turn', { model: 'claude-haiku-4-5' }),
+    );
+    await anthropic.generateText(ask);
+    expect(events('llm.call')[0]).toMatchObject({
+      model: 'claude-haiku-4-5',
+      requestedModel: 'claude-opus-5-5',
+      costUsd: 0.000035,
+    });
+  });
+
+  it('logs the invalid-JSON retry and both calls', async () => {
+    let n = 0;
+    const { anthropic, events } = logged(() => text(n++ === 0 ? 'not json' : '{"ok":true}'));
+    await anthropic.generateJson({ ...ask, schema: z.object({ ok: z.boolean() }) });
+    expect(events('llm.retry')).toHaveLength(1);
+    expect(events('llm.retry')[0]).toMatchObject({ attempt: 2, reason: 'invalid_json' });
+    expect(events('llm.call')).toHaveLength(2);
+  });
+
+  it('logs pings at debug', async () => {
+    const { anthropic, events } = logged(() =>
+      jsonResponse({ id: settings.model, type: 'model', display_name: 'Claude' }),
+    );
+    await anthropic.ping();
+    expect(events('llm.call')[0]).toMatchObject({ level: 20, operation: 'ping' });
+  });
+
+  it('keeps prompts and responses out of the logs unless content logging is on', async () => {
+    const off = logged(() => text('Secret answer.'));
+    await off.anthropic.generateText(ask);
+    expect(off.raw.join('')).not.toMatch(/rude investor|Secret answer/);
+
+    const on = logged(() => text('Secret answer.'), {}, true);
+    await on.anthropic.generateText(ask);
+    expect(on.events('llm.call')[0]).toMatchObject({
+      prompt: { system: 'You are a rude investor.', messages: [{ role: 'user', content: 'Hi' }] },
+      response: { text: 'Secret answer.' },
+    });
+    expect(on.raw.join('')).not.toContain(API_KEY);
   });
 });
