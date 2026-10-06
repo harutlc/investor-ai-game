@@ -20,6 +20,5 @@ data/
 # Terraform (infra/aws)
 infra/aws/.terraform/
 infra/aws/terraform.tfvars
-infra/aws/backend.tf
 *.tfstate
 *.tfstate.*

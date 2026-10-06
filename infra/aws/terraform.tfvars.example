@@ -1,12 +1,14 @@
 # Copy to terraform.tfvars (git-ignored) and fill in.
 
 region = "eu-central-1"
-domain = "game.example.com"
+domain     = "game.example.com"
+api_domain = "game-api.example.com"
 
 # environment             = "prod"
 # instance_type           = "t4g.small"
 # data_volume_size_gb     = 10
 # snapshot_retention_days = 7
 
-# Set when the domain's DNS is in Route 53; otherwise point an A record at the `public_ip` output yourself.
+# Set when the domain's DNS is in Route 53; otherwise point A records for both domains at the
+# `public_ip` output yourself.
 # route53_zone_id = "Z0123456789ABCDEFGHIJ"

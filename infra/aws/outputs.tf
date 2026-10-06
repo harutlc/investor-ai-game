@@ -36,6 +36,10 @@ output "domain" {
   value = var.domain
 }
 
+output "api_domain" {
+  value = var.api_domain
+}
+
 output "image_platform" {
   description = "Platform the images must be built for (matches the instance architecture)."
   value       = local.image_platform

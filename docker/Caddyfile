@@ -1,19 +1,36 @@
-# TLS edge for the AWS stack (docker-compose.aws.yml). Caddy obtains and renews the certificate for
-# $DOMAIN, redirects HTTP to HTTPS, and forwards everything to the web container (nginx), which serves the
-# UI and proxies /api as it does locally.
+# TLS edge for the AWS stack (docker-compose.aws.yml). Caddy obtains and renews certificates for $DOMAIN
+# and $API_DOMAIN, redirects HTTP to HTTPS, and forwards to the web container (nginx), which serves the UI
+# and proxies /api as it does locally. $API_DOMAIN exposes only /api, through the same nginx hop, so the
+# API sees the same proxy chain whichever host a request came in on.
 #
 # No `trusted_proxies`: Caddy replaces any client-sent X-Forwarded-For with the real peer address, and
 # nginx appends Caddy's, so the API trusts exactly 2 hops (TRUST_PROXY=2).
 
-{$DOMAIN} {
-	header Strict-Transport-Security "max-age=31536000"
-
-	# nginx already compresses; no `encode` here.
+(to_web) {
 	reverse_proxy web:8080 {
 		transport http {
 			# A negotiation turn can wait on slow LLM providers; matches nginx's 180 s.
 			read_timeout 180s
 			write_timeout 180s
 		}
+	}
+}
+
+{$DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000"
+
+	# nginx already compresses; no `encode` here.
+	import to_web
+}
+
+{$API_DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000"
+
+	handle /api/* {
+		import to_web
+	}
+	# The UI lives on $DOMAIN only.
+	handle {
+		redir https://{$DOMAIN}{uri}
 	}
 }

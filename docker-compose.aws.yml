@@ -5,7 +5,7 @@
 # and is the only service with host ports, the database lives on the EBS data volume, and the API is
 # pinned to the production topology (hosted providers, the public origin, two trusted proxy hops).
 #
-# Set by the deploy in /opt/investor/.env: ECR_REGISTRY, IMAGE_TAG, DOMAIN, CSRF_ENABLED and the secrets
+# Set by the deploy in /opt/investor/.env: ECR_REGISTRY, IMAGE_TAG, DOMAIN, API_DOMAIN, CSRF_ENABLED and the secrets
 # from SSM. Compose reads .env for interpolation; env_file passes the secrets to the api container.
 
 name: investor-game
@@ -56,6 +56,7 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?}
+      API_DOMAIN: ${API_DOMAIN:?}
     ports:
       - 80:80
       - 443:443

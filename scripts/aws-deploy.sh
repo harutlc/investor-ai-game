@@ -63,6 +63,7 @@ region=$(tf_out region) || die "no Terraform outputs in $tf_dir; run terraform a
 instance_id=$(tf_out instance_id)
 registry=$(tf_out ecr_registry)
 domain=$(tf_out domain)
+api_domain=$(tf_out api_domain)
 ssm_prefix=$(tf_out ssm_prefix)
 platform=$(tf_out image_platform)
 
@@ -140,7 +141,7 @@ remote_script=$(
   cat <<REMOTE
 set -euo pipefail
 export AWS_REGION='$region' SSM_PREFIX='$ssm_prefix'
-TAG='$tag'; DOMAIN='$domain'; REGISTRY='$registry'
+TAG='$tag'; DOMAIN='$domain'; API_DOMAIN='$api_domain'; REGISTRY='$registry'
 cd /opt/investor
 
 mountpoint -q /srv/investor || { echo "data volume is not mounted at /srv/investor; bootstrap incomplete (see /var/log/cloud-init-output.log)" >&2; exit 1; }
@@ -176,6 +177,7 @@ for name, value in sorted(params.items()):
   echo "ECR_REGISTRY='\$REGISTRY'"
   echo "IMAGE_TAG='\$TAG'"
   echo "DOMAIN='\$DOMAIN'"
+  echo "API_DOMAIN='\$API_DOMAIN'"
 } >> next/.env
 
 docker compose -f next/docker-compose.yml pull --quiet
@@ -242,5 +244,9 @@ sys.exit(0 if all(checks.get(k) == "ok" for k in ("database", "thinking", "decis
   sleep 5
 done
 
-echo "Deployed $tag to https://$domain"
+# The API host gets its own certificate; a failure here means its DNS or certificate is not ready yet.
+curl -fsS --max-time 10 -o /dev/null "https://$api_domain/api/health" \
+  || echo "warning: https://$api_domain/api/health is not reachable yet (DNS or certificate still pending?)" >&2
+
+echo "Deployed $tag to https://$domain (API also at https://$api_domain/api)"
 echo "Previous tag: ${previous:-none}   (roll back with: scripts/aws-deploy.sh --tag ${previous:-<tag>})"

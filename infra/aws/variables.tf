@@ -19,6 +19,11 @@ variable "domain" {
   type        = string
 }
 
+variable "api_domain" {
+  description = "Public domain that serves only the API (e.g. game-api.example.com), on the same instance."
+  type        = string
+}
+
 variable "instance_type" {
   description = "EC2 instance type. Graviton (t4g/m7g/...) builds linux/arm64 images, others linux/amd64."
   type        = string
@@ -32,7 +37,7 @@ variable "data_volume_size_gb" {
 }
 
 variable "route53_zone_id" {
-  description = "Optional Route 53 hosted zone ID. When set, an A record for var.domain is created."
+  description = "Optional Route 53 hosted zone ID. When set, A records for var.domain and var.api_domain are created."
   type        = string
   default     = null
 }

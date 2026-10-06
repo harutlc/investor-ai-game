@@ -90,6 +90,11 @@ Internet ──80/443──▶ caddy (Let's Encrypt, HTTP→HTTPS) ──▶ web
                                                                      (+ Caddy certs), daily snapshots
 ```
 
+Two host names point at the one instance, and Caddy routes by host name:
+
+- `domain` (for example `investor-game.utrakme.com`) serves the UI. The UI calls `/api` on its own host, as it does locally.
+- `api_domain` (for example `investor-game-api.utrakme.com`) serves only `/api/*`, for direct clients such as Postman or scripts. Any other path redirects to the UI. Requests on either host take the same Caddy → nginx → api path, so the API's proxy settings and rate limits behave the same way.
+
 What's created and where:
 
 - **Infrastructure.** Terraform in `infra/aws/` creates:
@@ -99,7 +104,7 @@ What's created and where:
   - ECR repositories for the two images;
   - IAM roles;
   - an EC2 auto-recover alarm;
-  - optionally, a Route 53 record.
+  - optionally, Route 53 A records for both host names.
 - **Runtime config.** `docker-compose.aws.yml` and `docker/Caddyfile` are the runtime config. `scripts/aws-deploy.sh` copies them to the instance on every deploy.
 - **Providers.** The API runs with `NODE_ENV=production`, `THINKING_PROVIDER=anthropic` and `DECISION_PROVIDER=jev`. Ollama and Laya are not deployed.
 - **Access.** Only ports 80 and 443 are open. There is no SSH, and shell access is through AWS Systems Manager.
@@ -121,7 +126,7 @@ A public URL can drive LLM spend, so set spend limits in the Anthropic and TypeS
 - Docker with Buildx.
 - `git`, `python3` and `curl`.
 - The Session Manager plugin for the AWS CLI, needed only for shell access.
-- A domain name. If its DNS is in Route 53, the record is created for you.
+- Two host names: one for the UI and one for the API. If their DNS is in Route 53, the records are created for you.
 - An Anthropic API key and a TypeSafe (Jev) API key.
 
 Images are built for the instance's CPU, `linux/arm64` on the default Graviton instance. On Apple Silicon this is a native build; on x86 it is emulated and slower. To use an x86 instance instead, set `instance_type = "t3.small"`. The deploy script picks the platform from Terraform's `image_platform` output.
@@ -130,11 +135,11 @@ Images are built for the instance's CPU, `linux/arm64` on the default Graviton i
 
 ```bash
 # 1. Infrastructure
-cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars   # set region, domain, optional route53_zone_id
+cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars   # set region, domain, api_domain, optional route53_zone_id
 terraform -chdir=infra/aws init
 terraform -chdir=infra/aws apply
 
-# 2. DNS (skip if route53_zone_id is set): point an A record for your domain at this IP, then wait until it resolves
+# 2. DNS (skip if route53_zone_id is set): point A records for domain and api_domain at this IP, then wait until they resolve
 terraform -chdir=infra/aws output -raw public_ip
 
 # 3. Secrets: SecureString parameters under the ssm_prefix output (/investor-game/prod/ by default)
@@ -150,7 +155,7 @@ scripts/aws-deploy.sh
 
 The instance needs a minute or two after `apply` to install Docker and mount the data volume. If the deploy reports that the instance is not reachable through SSM, or that the data volume is not mounted, wait and run it again.
 
-Caddy requests the certificate on the first deploy. It needs the domain to already resolve to the instance, and it retries automatically until it does.
+Caddy requests a certificate for each host name on the first deploy. Each name needs to already resolve to the instance, and Caddy retries automatically until it does.
 
 Every parameter under the prefix is passed to the API's environment. You can add other overrides there as well, for example `LOG_LEVEL`. Parameter values cannot contain a single quote or a newline.
 
@@ -225,7 +230,7 @@ On the instance, the paths are:
 2. Run `terraform -chdir=infra/aws destroy`.
 3. Delete the volume, the snapshots and the SSM parameters by hand if you no longer want them.
 
-**Terraform state.** State is stored locally by default and is git-ignored. To share it, see `infra/aws/backend.tf.example`.
+**Terraform state.** State lives in S3 at `s3://terraform-state-harut/investor-game/prod/terraform.tfstate` (see `infra/aws/backend.tf`). The bucket is versioned and encrypted, and S3-native locking (`use_lockfile`) stops two applies from running at once. To use your own bucket, edit `backend.tf` and run `terraform -chdir=infra/aws init -migrate-state`.
 
 ## Scripts (run from the repo root)
 
