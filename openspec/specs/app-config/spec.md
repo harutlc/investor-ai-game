@@ -18,7 +18,11 @@ The system SHALL load non-secret settings from a committed JSON config file (`co
 - **THEN** the API uses them to sign cookies and CSRF tokens
 
 ### Requirement: Environment overrides
-The system SHALL let selected environment variables override values from the config file: at least `PORT`, `CORS_ORIGINS` (comma-separated), `DATABASE_FILE`, `LOG_LEVEL`, `NODE_ENV` and `TRUST_PROXY`. An environment value MUST win over the file value.
+The system SHALL let selected environment variables override values from the config file: at least `PORT`, `CORS_ORIGINS` (comma-separated), `DATABASE_FILE`, `LOG_LEVEL`, `LOG_LLM_CONTENT`, `NODE_ENV` and `TRUST_PROXY`. An environment value MUST win over the file value.
+
+`LOG_LEVEL` is optional both in the environment and in the config file. When it is set in neither, the log level is the default for the environment (see api-foundation, "Structured logging with redaction").
+
+`LOG_LLM_CONTENT` overrides `logging.llmContent`. It accepts `true` or `false`, and any other value MUST be rejected at startup. It defaults to `false`.
 
 `TRUST_PROXY` overrides `server.trustProxy`. It accepts:
 - `false`, which trusts no proxy;
@@ -50,6 +54,14 @@ The system SHALL let selected environment variables override values from the con
 #### Scenario: Trust-all is refused
 - **WHEN** the environment sets `TRUST_PROXY=true`
 - **THEN** startup aborts with a non-zero exit code and a message that names `server.trustProxy (from TRUST_PROXY)`
+
+#### Scenario: LLM content logging enabled
+- **WHEN** the environment sets `LOG_LLM_CONTENT=true`
+- **THEN** LLM log lines include the prompt and response content
+
+#### Scenario: Invalid LLM content flag
+- **WHEN** the environment sets `LOG_LLM_CONTENT=yes`
+- **THEN** startup aborts with a non-zero exit code and a message that names `logging.llmContent (from LOG_LLM_CONTENT)`
 
 ### Requirement: Validation and fail-fast startup
 The system SHALL validate the merged configuration against a schema before it opens any port or database connection. When validation fails, the process MUST exit with a non-zero code and print a message that names every invalid or missing key. Keys that are required only conditionally (for example `CSRF_SECRET` while CSRF protection is enabled, or the active provider's API key) MAY be reported in a second pass, once the other problems are fixed. The message MUST NOT print secret values.

@@ -32,6 +32,7 @@ const META: LlmCallMeta = {
   provider: 'anthropic',
   operation: 'generate',
   model: 'claude-opus-5-5',
+  priced: true,
   maxTokens: 1024,
   temperature: null,
   effort: 'low',
@@ -170,6 +171,82 @@ describe('LlmCallLogger.run', () => {
   });
 });
 
+describe('LlmCallLogger.run for self-hosted and non-Anthropic providers', () => {
+  const LAYA: LlmCallMeta = {
+    provider: 'laya',
+    operation: 'decide',
+    model: 'english',
+    priced: false,
+    timeoutMs: 1000,
+    prompt: { state: 'My secret pitch', questions: { accept: { type: 'noul', instructions: 'yes?' } } },
+  };
+
+  it('logs an unpriced call with costUsd null and no missing-price warning', async () => {
+    const { calls, events, lines } = setup();
+    await calls.run(
+      LAYA,
+      () => Promise.resolve('r'),
+      () => ({ usage: { ...USAGE, outputTokens: 20 }, providerRequestId: 'ts_1' }),
+    );
+    expect(events('llm.call')[0]).toMatchObject({
+      provider: 'laya',
+      operation: 'decide',
+      costUsd: null,
+      providerRequestId: 'ts_1',
+    });
+    expect(events('llm.call')[0]).not.toHaveProperty('anthropicRequestId');
+    expect(lines.some((line) => line.event === 'llm.price_missing')).toBe(false);
+  });
+
+  it("logs a TypeSafe error's request id as providerRequestId", async () => {
+    const { calls, events } = setup();
+    class APIConnectionError extends Error {
+      requestId = 'ts_9';
+    }
+    await expect(
+      calls.run(
+        LAYA,
+        () => Promise.reject(new APIConnectionError('refused')),
+        () => ({}),
+      ),
+    ).rejects.toThrow('refused');
+    expect(events('llm.call_failed')[0]).toMatchObject({
+      level: 50,
+      errorType: 'APIConnectionError',
+      status: null,
+      providerRequestId: 'ts_9',
+    });
+  });
+
+  it('logs decision state, questions and answers only when content logging is on', async () => {
+    const info = () => ({ usage: USAGE, answers: { accept: { type: 'noul', probability: 0.4 } } });
+    const off = setup();
+    await off.calls.run(LAYA, () => Promise.resolve('r'), info);
+    expect(JSON.stringify(off.lines)).not.toMatch(/secret pitch|questions|answers/);
+
+    const on = setup(true);
+    await on.calls.run(LAYA, () => Promise.resolve('r'), info);
+    expect(on.events('llm.call')[0]).toMatchObject({
+      prompt: { state: 'My secret pitch', questions: { accept: { type: 'noul' } } },
+      response: { answers: { accept: { probability: 0.4 } } },
+    });
+  });
+
+  it('logs a failed ping at warn and does not mark it reported', async () => {
+    const { calls, events } = setup();
+    const error = new Error('down');
+    await expect(
+      calls.run(
+        { ...LAYA, operation: 'ping' },
+        () => Promise.reject(error),
+        () => ({}),
+      ),
+    ).rejects.toBe(error);
+    expect(events('llm.call_failed')[0]).toMatchObject({ level: 40, operation: 'ping' });
+    expect(ReportedErrors.has(error)).toBe(false);
+  });
+});
+
 describe('LlmCallLogger.instrumentFetch', () => {
   const replies = (...responses: (Response | Error)[]) => {
     const fetch: typeof globalThis.fetch = () => {
@@ -254,6 +331,36 @@ describe('LlmCallLogger.instrumentFetch', () => {
     );
     expect(events('llm.timeout')[0]).toMatchObject({ attempt: 1, timeoutMs: 1000 });
     expect(events('llm.retry')[0]).toMatchObject({ attempt: 2, reason: 'timeout' });
+  });
+
+  it('treats a TimeoutError from the wrapped fetch as a timeout', async () => {
+    const { calls, events } = setup();
+    const fetch = calls.instrumentFetch(
+      replies(new DOMException('The operation timed out.', 'TimeoutError'), new Response('{}')),
+    );
+    await calls.run(
+      META,
+      () => sdkLike(fetch, 2),
+      () => ok(),
+    );
+    expect(events('llm.timeout')[0]).toMatchObject({ attempt: 1 });
+    expect(events('llm.retry')[0]).toMatchObject({ attempt: 2, reason: 'timeout' });
+  });
+
+  it('logs the TypeSafe request id header on a rate-limited attempt', async () => {
+    const { calls, events } = setup();
+    const fetch = calls.instrumentFetch(
+      replies(
+        new Response('{}', { status: 429, headers: { 'x-typesafe-request-id': 'ts_r' } }),
+        new Response('{}'),
+      ),
+    );
+    await calls.run(
+      { ...META, provider: 'jev', model: 'jev-latest' },
+      () => sdkLike(fetch, 2),
+      () => ({}),
+    );
+    expect(events('llm.rate_limited')[0]).toMatchObject({ provider: 'jev', providerRequestId: 'ts_r' });
   });
 
   it('passes calls made outside run straight through', async () => {

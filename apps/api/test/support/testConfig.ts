@@ -78,6 +78,12 @@ export function testConfig(overrides: Overrides = {}): AppConfig {
           cacheReadPerMTok: 0.2,
           cacheWritePerMTok: 5,
         },
+        'jev-latest': {
+          inputPerMTok: 1,
+          outputPerMTok: 5,
+          cacheReadPerMTok: 0,
+          cacheWritePerMTok: 0,
+        },
         'claude-haiku-4-5': {
           inputPerMTok: 1,
           outputPerMTok: 5,

@@ -22,9 +22,13 @@ export class LlmPricing {
     private readonly logger: Logger,
   ) {}
 
-  /** Cost rounded to 6 decimals, or `null` (with one warning per model) when the model has no price. */
-  estimate(model: string, usage: LlmUsage): number | null {
-    const price = this.prices[model] ?? this.prices[model.replace(DATE_SUFFIX, '')];
+  /**
+   * Cost rounded to 6 decimals, or `null` (with one warning per model) when the model has no price.
+   * `alias` is the configured name to fall back on when the backend reports a resolved version instead
+   * (Jev answers `jev-latest` requests as e.g. `jev-1.13.0`).
+   */
+  estimate(model: string, usage: LlmUsage, alias?: string): number | null {
+    const price = this.priceOf(model) ?? (alias === undefined ? undefined : this.priceOf(alias));
     if (!price) {
       if (!this.warned.has(model)) {
         this.warned.add(model);
@@ -42,5 +46,9 @@ export class LlmPricing {
         usage.cacheCreationInputTokens * price.cacheWritePerMTok) /
       PER_MILLION;
     return Math.round(cost * PER_MILLION) / PER_MILLION;
+  }
+
+  private priceOf(model: string) {
+    return this.prices[model] ?? this.prices[model.replace(DATE_SUFFIX, '')];
   }
 }

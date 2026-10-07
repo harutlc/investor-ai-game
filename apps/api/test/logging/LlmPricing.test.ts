@@ -30,6 +30,12 @@ describe('LlmPricing', () => {
     expect(pricing.estimate('claude-opus-5-5', usage({ cacheCreationInputTokens: 1_000_000 }))).toBe(5);
   });
 
+  it('falls back to the alias price when the reported version has none', () => {
+    const { pricing, lines } = setup();
+    expect(pricing.estimate('jev-1.13.0', usage({ inputTokens: 1_000_000 }), 'claude-haiku-4-5')).toBe(1);
+    expect(lines).toHaveLength(0);
+  });
+
   it('rounds to 6 decimals', () => {
     const { pricing } = setup();
     expect(pricing.estimate('claude-haiku-4-5', usage({ inputTokens: 3, outputTokens: 7 }))).toBe(0.000038);

@@ -4,11 +4,22 @@ import type { LlmMessage } from '../llm/thinking/ThinkingProvider.js';
 import { ReportedErrors } from '../monitoring/ReportedErrors.js';
 import type { LlmPricing, LlmUsage } from './LlmPricing.js';
 
+export type LlmProviderName = 'anthropic' | 'ollama' | 'jev' | 'laya';
+
+/** What `LOG_LLM_CONTENT` adds: a chat prompt for thinking calls, the judged state for decisions. */
+export type LlmPrompt =
+  { system?: string | undefined; messages: readonly LlmMessage[] } | { state: unknown; questions: unknown };
+
 export interface LlmCallMeta {
-  provider: string;
-  /** `ping` is the reachability check; its successes log at debug (health probes run on a timer). */
-  operation: 'generate' | 'ping';
+  provider: LlmProviderName;
+  /**
+   * `ping` is the reachability check: successes log at debug and failures at warn, since health probes
+   * run on a timer and the health endpoint already reports the outage.
+   */
+  operation: 'generate' | 'decide' | 'ping';
   model: string;
+  /** False for self-hosted backends: `costUsd` is null and no missing-price warning is written. */
+  priced: boolean;
   maxTokens?: number;
   /** `null` when the request sends none. */
   temperature?: number | null;
@@ -17,7 +28,7 @@ export interface LlmCallMeta {
   /** Per-attempt timeout, reported on `llm.timeout`. */
   timeoutMs: number;
   /** Logged only when `LOG_LLM_CONTENT` is on. */
-  prompt?: { system?: string | undefined; messages: readonly LlmMessage[] };
+  prompt?: LlmPrompt;
 }
 
 export interface LlmResponseInfo {
@@ -26,8 +37,12 @@ export interface LlmResponseInfo {
   usage?: LlmUsage;
   stopReason?: string | null;
   anthropicRequestId?: string | null;
+  /** The backend's own request id for non-Anthropic providers (Jev/Laya: `x-typesafe-request-id`). */
+  providerRequestId?: string | null;
   /** Logged only when `LOG_LLM_CONTENT` is on. */
   text?: string;
+  /** Decision answers; logged only when `LOG_LLM_CONTENT` is on. */
+  answers?: unknown;
   /** A decline that arrived as a successful response: logged as a failed call. */
   refusal?: { category: string | null };
 }
@@ -118,7 +133,10 @@ export class LlmCallLogger {
             attempt,
             status: response.status,
             ...LlmCallLogger.retryAfter(response.headers),
-            anthropicRequestId: response.headers.get('request-id'),
+            ...LlmCallLogger.requestIdField(
+              frame.meta,
+              response.headers.get('request-id') ?? response.headers.get('x-typesafe-request-id'),
+            ),
           },
           event,
         );
@@ -145,12 +163,13 @@ export class LlmCallLogger {
       model,
       ...(model === meta.model ? {} : { requestedModel: meta.model }),
       ...this.params(meta),
-      ...(usage ? { usage, costUsd: this.options.pricing.estimate(model, info.usage!) } : {}),
+      ...(usage ? { usage, costUsd: meta.priced ? this.estimateCost(meta, model, info.usage!) : null } : {}),
       latencyMs: LlmCallLogger.since(started),
       attempts: Math.max(1, frame.attempts),
       ...(info.stopReason === undefined ? {} : { stopReason: info.stopReason }),
       ...(info.anthropicRequestId === undefined ? {} : { anthropicRequestId: info.anthropicRequestId }),
-      ...this.content(meta, info.text),
+      ...(info.providerRequestId === undefined ? {} : { providerRequestId: info.providerRequestId }),
+      ...this.content(meta, info),
     };
     if (info.refusal) {
       this.logger.error(
@@ -171,9 +190,19 @@ export class LlmCallLogger {
 
   private failed(frame: CallFrame, started: number, error: unknown): void {
     const { meta } = frame;
-    const status = (error as { status?: unknown } | null)?.status;
-    const requestId = (error as { requestID?: unknown } | null)?.requestID;
-    this.logger.error(
+    // SDK errors carry `status`; the ollama client's ResponseError carries `status_code`.
+    const { status: sdkStatus, status_code: statusCode } = (error ?? {}) as {
+      status?: unknown;
+      status_code?: unknown;
+    };
+    const status = sdkStatus ?? statusCode;
+    // Anthropic's SDK names it `requestID`, TypeSafe's `requestId`.
+    const { requestID, requestId } = (error ?? {}) as { requestID?: unknown; requestId?: unknown };
+    const id = [requestID, requestId].find((value): value is string => typeof value === 'string');
+    // A failed health probe is reported by the health endpoint; at error it would open a Sentry event
+    // on every probe window. It never reaches the HTTP error handler, so it is not marked either.
+    const isPing = meta.operation === 'ping';
+    this.logger[isPing ? 'warn' : 'error'](
       {
         ...this.base(meta),
         event: 'llm.call_failed',
@@ -182,21 +211,34 @@ export class LlmCallLogger {
         status: typeof status === 'number' ? status : null,
         attempts: Math.max(1, frame.attempts),
         latencyMs: LlmCallLogger.since(started),
-        anthropicRequestId: typeof requestId === 'string' ? requestId : null,
+        ...LlmCallLogger.requestIdField(meta, id ?? null),
         ...this.content(meta),
         err: error,
       },
       'llm.call_failed',
     );
-    ReportedErrors.mark(error);
+    if (!isPing) ReportedErrors.mark(error);
   }
 
   private base(meta: LlmCallMeta) {
     return { provider: meta.provider, operation: meta.operation, model: meta.model };
   }
 
+  /**
+   * Anthropic's serving model differs from the requested one only after a fallback, which must be priced
+   * at its own rates. Elsewhere it is a resolved alias, so the configured name's price still applies.
+   */
+  private estimateCost(meta: LlmCallMeta, model: string, usage: LlmUsage): number | null {
+    return this.options.pricing.estimate(
+      model,
+      usage,
+      meta.provider === 'anthropic' ? undefined : meta.model,
+    );
+  }
+
+  /** Sampling parameters; decisions and pings have none. */
   private params(meta: LlmCallMeta) {
-    if (meta.operation === 'ping') return {};
+    if (meta.operation !== 'generate') return {};
     return {
       maxTokens: meta.maxTokens,
       temperature: meta.temperature ?? null,
@@ -205,12 +247,18 @@ export class LlmCallLogger {
     };
   }
 
-  private content(meta: LlmCallMeta, text?: string) {
+  private content(meta: LlmCallMeta, info: LlmResponseInfo = {}) {
     if (!this.options.logContent || !meta.prompt) return {};
-    return {
-      prompt: { system: meta.prompt.system, messages: meta.prompt.messages },
-      ...(text === undefined ? {} : { response: { text } }),
+    const response = {
+      ...(info.text === undefined ? {} : { text: info.text }),
+      ...(info.answers === undefined ? {} : { answers: info.answers }),
     };
+    return { prompt: meta.prompt, ...(Object.keys(response).length > 0 ? { response } : {}) };
+  }
+
+  /** Anthropic lines keep their `anthropicRequestId`; every other backend's id is `providerRequestId`. */
+  private static requestIdField(meta: LlmCallMeta, id: string | null) {
+    return meta.provider === 'anthropic' ? { anthropicRequestId: id } : { providerRequestId: id };
   }
 
   private outcome(status: number): string | undefined {
@@ -219,9 +267,14 @@ export class LlmCallLogger {
     return undefined;
   }
 
-  /** The SDK aborts its own controller on timeout; this app never passes a caller abort signal. */
+  /**
+   * SDKs abort their own controller on timeout (an `AbortError`, with `init.signal` aborted); Ollama's
+   * `AbortSignal.timeout` inside the wrapped fetch rejects with a `TimeoutError` instead. This app never
+   * passes a caller abort signal.
+   */
   private isTimeout(error: unknown, init: RequestInit | undefined): boolean {
-    return (error instanceof Error && error.name === 'AbortError') || init?.signal?.aborted === true;
+    const name = error instanceof Error || error instanceof DOMException ? error.name : undefined;
+    return name === 'AbortError' || name === 'TimeoutError' || init?.signal?.aborted === true;
   }
 
   /** `retry-after-ms` (milliseconds) or `retry-after` (seconds or an HTTP date), as both units. */

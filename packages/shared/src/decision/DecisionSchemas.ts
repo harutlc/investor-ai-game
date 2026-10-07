@@ -100,7 +100,10 @@ export const DecisionResultDtoSchema = z.object({
   provider: z.string(),
   model: z.string(),
   answers: z.record(z.string(), DecisionAnswerSchema),
-  usage: z.object({ inputTokens: z.number().int().nonnegative() }),
+  usage: z.object({
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative().optional(),
+  }),
   latencyMs: z.number().nonnegative(),
 });
 

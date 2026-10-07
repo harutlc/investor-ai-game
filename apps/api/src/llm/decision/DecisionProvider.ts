@@ -50,7 +50,7 @@ export interface DecisionResult<Q extends QuestionSet = QuestionSet> {
   /** The model the backend reports having used. */
   model: string;
   answers: { [K in keyof Q]: AnswerFor<Q[K]> };
-  usage: { inputTokens: number };
+  usage: { inputTokens: number; outputTokens: number };
   latencyMs: number;
 }
 

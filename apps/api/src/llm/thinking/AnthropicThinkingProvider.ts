@@ -98,6 +98,7 @@ export class AnthropicThinkingProvider implements ThinkingProvider {
       provider: this.name,
       operation: 'ping',
       model: this.model,
+      priced: true,
       timeoutMs: PING_TIMEOUT_MS,
     };
     try {
@@ -150,6 +151,7 @@ export class AnthropicThinkingProvider implements ThinkingProvider {
       provider: this.name,
       operation: 'generate',
       model: this.model,
+      priced: true,
       maxTokens: this.settings.maxTokens,
       temperature: null,
       effort: this.settings.effort,
