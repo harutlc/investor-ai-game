@@ -9,6 +9,8 @@ import {
 import type { Logger } from 'pino';
 import type { AppConfig } from '../../config/AppConfig.js';
 import { AppError } from '../../errors/AppError.js';
+import { LlmCallLogger, type LlmCallMeta, type LlmResponseInfo } from '../../logging/LlmCallLogger.js';
+import { LlmPricing } from '../../logging/LlmPricing.js';
 import { ProviderBadResponseError } from '../errors/ProviderBadResponseError.js';
 import { ProviderUnavailableError } from '../errors/ProviderUnavailableError.js';
 import type { ProviderDeps } from '../ProviderDeps.js';
@@ -34,11 +36,15 @@ const KEY_ENV: Record<SystemOneName, string> = { jev: 'TYPESAFE_API_KEY', laya: 
  * so both use the official TypeSafe client, differing only in base URL, key and model. Every option is
  * passed explicitly: ConfigLoader does not export .env into process.env, so the SDK's TYPESAFE_* env
  * fallbacks would otherwise see the wrong (or no) values.
+ *
+ * Every call goes through `LlmCallLogger.run`, and the SDK calls the instrumented `fetch` once per attempt,
+ * so retries, 429s and timeouts are logged without any logging here.
  */
 export class SystemOneDecisionProvider implements DecisionProvider {
   private readonly client: TypeSafeClient;
   private readonly logger: Logger;
   private readonly fetch: typeof globalThis.fetch;
+  private readonly calls: LlmCallLogger;
 
   constructor(
     readonly name: SystemOneName,
@@ -47,7 +53,12 @@ export class SystemOneDecisionProvider implements DecisionProvider {
     deps: ProviderDeps,
   ) {
     this.logger = deps.logger;
-    this.fetch = deps.fetch ?? globalThis.fetch;
+    // Hand-built providers (tests, scripts) get a logger without prices; the container passes the shared one.
+    this.calls =
+      deps.llmCalls ??
+      new LlmCallLogger({ logger: deps.logger, pricing: new LlmPricing({}, deps.logger), logContent: false });
+    const fetch = deps.fetch ?? globalThis.fetch;
+    this.fetch = this.calls.instrumentFetch((input, init) => fetch(input, init));
     this.client = new TypeSafeClient({
       apiKey: apiKey ?? KEYLESS_PLACEHOLDER,
       baseURL: settings.baseUrl,
@@ -63,24 +74,40 @@ export class SystemOneDecisionProvider implements DecisionProvider {
   async decide<const Q extends QuestionSet>(request: DecisionRequest<Q>): Promise<DecisionResult<Q>> {
     validateDecisionRequest(request);
     const started = performance.now();
-    let result: Awaited<ReturnType<TypeSafeClient['systemOne']>>;
+    const meta: LlmCallMeta = {
+      ...this.meta('decide', this.settings.timeoutMs),
+      prompt: { state: request.state, questions: request.questions },
+    };
     try {
-      result = await this.client.systemOne({
-        state: request.state as Parameters<TypeSafeClient['systemOne']>[0]['state'],
-        questions: request.questions as unknown as Questions,
-      });
+      return await this.calls
+        .run(
+          meta,
+          async () => {
+            // Mapping runs inside the call: an answer the questions don't allow is a failed call, not a success.
+            const { data, requestId } = await this.client
+              .systemOne({
+                state: request.state as Parameters<TypeSafeClient['systemOne']>[0]['state'],
+                questions: request.questions as unknown as Questions,
+              })
+              .withResponse();
+            const answers = DecisionAnswerMapper.map(request.questions, data.answers);
+            // Typed as required, but tolerate a backend that omits usage rather than crash.
+            const usage = data.usage as typeof data.usage | undefined;
+            const result: DecisionResult<Q> = {
+              provider: this.name,
+              model: data.model,
+              answers: answers as DecisionResult<Q>['answers'],
+              usage: { inputTokens: usage?.input_tokens ?? 0, outputTokens: usage?.output_tokens ?? 0 },
+              latencyMs: Math.round(performance.now() - started),
+            };
+            return { result, requestId };
+          },
+          ({ result, requestId }) => SystemOneDecisionProvider.describe(result, requestId),
+        )
+        .then(({ result }) => result);
     } catch (error) {
       throw this.toProviderError(error);
     }
-    const answers = DecisionAnswerMapper.map(request.questions, result.answers);
-    return {
-      provider: this.name,
-      model: result.model,
-      answers: answers as DecisionResult<Q>['answers'],
-      // Typed as required, but tolerate a backend that omits usage rather than crash.
-      usage: { inputTokens: (result.usage as typeof result.usage | undefined)?.input_tokens ?? 0 },
-      latencyMs: Math.round(performance.now() - started),
-    };
   }
 
   decideMany(requests: readonly DecisionRequest[]): Promise<DecisionResult[]> {
@@ -89,49 +116,79 @@ export class SystemOneDecisionProvider implements DecisionProvider {
 
   async ping(): Promise<void> {
     try {
-      if (this.name === 'jev') {
-        // Lists models with the configured key: proves reachability and credentials, spends nothing.
-        await this.client.models.list({ timeout: PING_TIMEOUT_MS, retry: { maxRetries: 0 } });
-        return;
-      }
-      const response = await this.fetch(`${this.settings.baseUrl.replace(/\/+$/, '')}/health`, {
-        headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {},
-        signal: AbortSignal.timeout(PING_TIMEOUT_MS),
-      });
-      if (!response.ok) throw new ProviderUnavailableError(`Laya health check answered ${response.status}`);
+      await this.calls.run(
+        this.meta('ping', PING_TIMEOUT_MS),
+        () => this.probe(),
+        () => ({}),
+      );
     } catch (error) {
       throw this.toProviderError(error);
     }
   }
 
+  private async probe(): Promise<void> {
+    if (this.name === 'jev') {
+      // Lists models with the configured key: proves reachability and credentials, spends nothing.
+      await this.client.models.list({ timeout: PING_TIMEOUT_MS, retry: { maxRetries: 0 } });
+      return;
+    }
+    const response = await this.fetch(`${this.settings.baseUrl.replace(/\/+$/, '')}/health`, {
+      headers: this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {},
+      signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new ProviderUnavailableError(`Laya health check answered ${response.status}`);
+  }
+
+  private meta(operation: 'decide' | 'ping', timeoutMs: number): LlmCallMeta {
+    // laya-serve is self-hosted: nothing to price.
+    return {
+      provider: this.name,
+      operation,
+      model: this.settings.model,
+      priced: this.name === 'jev',
+      timeoutMs,
+    };
+  }
+
+  private static describe(result: DecisionResult, requestId: string | undefined): LlmResponseInfo {
+    return {
+      model: result.model,
+      usage: {
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      },
+      providerRequestId: requestId ?? null,
+      answers: result.answers,
+    };
+  }
+
+  /** LlmCallLogger has logged the failure (llm.call_failed); this only maps it to the API's error codes. */
   private toProviderError(error: unknown): unknown {
     if (error instanceof AppError) return error;
     if (error instanceof APIConnectionError) {
-      this.logger.warn({ provider: this.name, err: error.message }, 'Decision provider unreachable');
       return new ProviderUnavailableError(undefined, { cause: error });
     }
     if (error instanceof APIError) {
-      const context = { provider: this.name, status: error.status, requestId: error.requestId };
       if (error.status === 401 || error.status === 403) {
-        this.logger.error(context, `Decision provider rejected the credentials, check ${KEY_ENV[this.name]}`);
+        // A hint for operators next to the llm.call_failed line, not a second report.
+        this.logger.warn(
+          { provider: this.name, status: error.status },
+          `Decision provider rejected the credentials, check ${KEY_ENV[this.name]}`,
+        );
         return new ProviderUnavailableError(undefined, { cause: error });
       }
-      this.logger.warn({ ...context, err: error.message }, 'Decision request failed');
       return error.status === 429 || error.status >= 500
         ? new ProviderUnavailableError(undefined, { cause: error })
         : new ProviderBadResponseError(undefined, { cause: error });
     }
     // Any other SDK error means the backend answered with something malformed.
     if (error instanceof TypeSafeError) {
-      this.logger.warn(
-        { provider: this.name, err: error.message },
-        'Decision provider returned a malformed response',
-      );
       return new ProviderBadResponseError(undefined, { cause: error });
     }
     // fetch() failures and timeouts from the Laya health probe.
     if (error instanceof TypeError || (error instanceof Error && error.name === 'TimeoutError')) {
-      this.logger.warn({ provider: this.name, err: error.message }, 'Decision provider unreachable');
       return new ProviderUnavailableError(undefined, { cause: error });
     }
     return error;

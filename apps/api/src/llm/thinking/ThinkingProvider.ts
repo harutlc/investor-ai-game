@@ -53,11 +53,14 @@ export interface ThinkingProvider {
 export async function generateJsonWithRetry<T>(
   request: JsonRequest<T>,
   complete: (messages: readonly LlmMessage[]) => Promise<string>,
+  /** Called before the second attempt, e.g. to log the retry. */
+  onRetry?: (reason: 'invalid_json') => void,
 ): Promise<T> {
   const first = await complete(request.messages);
   const firstResult = JsonResponseParser.parse(first, request.schema);
   if (firstResult.ok) return firstResult.data;
 
+  onRetry?.('invalid_json');
   const retryMessages: LlmMessage[] = [
     ...request.messages,
     { role: 'assistant', content: first.trim() || '(empty reply)' },

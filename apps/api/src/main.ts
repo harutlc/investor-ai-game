@@ -1,15 +1,27 @@
+import * as Sentry from '@sentry/node';
+import type { Logger } from 'pino';
+import type { AppConfig } from './config/AppConfig.js';
 import { ConfigError } from './config/ConfigError.js';
 import { ConfigLoader } from './config/ConfigLoader.js';
 import { WorkspaceRoot } from './config/WorkspaceRoot.js';
 import { Container } from './container/Container.js';
+import { LoggerFactory } from './logging/LoggerFactory.js';
 
-function loadConfig() {
+/** The bootstrap logger until the container's logger exists. */
+let logger: Logger = LoggerFactory.bootstrap();
+
+/** Flushes Sentry (fatal lines become events) before exiting, so the last event is not lost. */
+function exitAfterFlush(code: number): void {
+  void Sentry.flush(2000).finally(() => process.exit(code));
+}
+
+function loadConfig(): AppConfig | undefined {
   try {
     return new ConfigLoader({ rootDir: WorkspaceRoot.find() }).load();
   } catch (error) {
     if (error instanceof ConfigError) {
-      console.error(error.message);
-      process.exit(1);
+      logger.fatal({ issues: error.issues }, error.message);
+      return undefined;
     }
     throw error;
   }
@@ -17,16 +29,21 @@ function loadConfig() {
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  if (!config) {
+    exitAfterFlush(1);
+    return;
+  }
   const container = new Container(config);
-  const { logger, server } = container;
+  const { server } = container;
+  logger = container.logger;
 
   process.on('unhandledRejection', (reason) => {
     logger.fatal({ err: reason }, 'unhandled promise rejection');
-    process.exit(1);
+    exitAfterFlush(1);
   });
   process.on('uncaughtException', (error) => {
     logger.fatal({ err: error }, 'uncaught exception');
-    process.exit(1);
+    exitAfterFlush(1);
   });
 
   let shuttingDown = false;
@@ -55,6 +72,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error(error);
-  process.exit(1);
+  logger.fatal({ err: error }, 'startup failed');
+  exitAfterFlush(1);
 });

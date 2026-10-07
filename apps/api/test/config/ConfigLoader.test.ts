@@ -172,6 +172,50 @@ describe('ConfigLoader: CSRF flag', () => {
   });
 });
 
+describe('ConfigLoader: logging', () => {
+  it('defaults the level to debug in development', () => {
+    expect(load({ NODE_ENV: 'development' }).logging.level).toBe('debug');
+  });
+
+  it('defaults the level to info in production', () => {
+    expect(load({ NODE_ENV: 'production' }).logging.level).toBe('info');
+  });
+
+  it('lets LOG_LEVEL win over the default', () => {
+    expect(load({ NODE_ENV: 'development', LOG_LEVEL: 'warn' }).logging.level).toBe('warn');
+  });
+
+  it('keeps a level set in the config file', () => {
+    writeConfig((config) => {
+      config.logging = { level: 'error' };
+    });
+    expect(load({ NODE_ENV: 'development' }).logging.level).toBe('error');
+  });
+
+  it('leaves LLM content logging off by default', () => {
+    expect(load().logging.llmContent).toBe(false);
+  });
+
+  it('turns LLM content logging on with LOG_LLM_CONTENT=true', () => {
+    expect(load({ LOG_LLM_CONTENT: 'true' }).logging.llmContent).toBe(true);
+  });
+
+  it('rejects a non-boolean LOG_LLM_CONTENT', () => {
+    expect(loadError({ COOKIE_SECRET, LOG_LLM_CONTENT: 'yes' }).message).toContain(
+      'logging.llmContent (from LOG_LLM_CONTENT) must be true or false',
+    );
+  });
+
+  it('loads the committed LLM price table', () => {
+    expect(load().llm.pricing['claude-opus-5-5']).toEqual({
+      inputPerMTok: 4,
+      outputPerMTok: 20,
+      cacheReadPerMTok: 0.2,
+      cacheWritePerMTok: 5,
+    });
+  });
+});
+
 describe('ConfigLoader: TRUST_PROXY', () => {
   it('trusts no proxy in the committed config', () => {
     expect(load().server.trustProxy).toBe(false);

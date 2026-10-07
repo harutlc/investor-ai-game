@@ -16,3 +16,9 @@ data/
 # OS / editor
 .DS_Store
 .idea/workspace.xml
+
+# Terraform (infra/aws)
+infra/aws/.terraform/
+infra/aws/terraform.tfvars
+*.tfstate
+*.tfstate.*

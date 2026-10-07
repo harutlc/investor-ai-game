@@ -77,6 +77,164 @@ DOCKER_NODE_ENV=development THINKING_PROVIDER=fake DECISION_PROVIDER=fake docker
 
 **Data.** The database lives in the `game-data` volume. It survives `docker compose down`, restarts and rebuilds. `docker compose down -v` deletes it. The stack assumes a single API replica: SQLite and the in-memory rate limits are per process.
 
+To run the same images on a public HTTPS domain, see "Deploy to AWS" below.
+
+## Deploy to AWS
+
+The same two images run on one EC2 instance with Docker Compose, behind Caddy for HTTPS:
+
+```
+Internet ──80/443──▶ caddy (Let's Encrypt, HTTP→HTTPS) ──▶ web (nginx :8080) ──/api──▶ api (:3001)
+                     EC2 t4g.small, Amazon Linux 2023                                   │
+                                                                     EBS data volume: game.sqlite
+                                                                     (+ Caddy certs), daily snapshots
+```
+
+Two host names point at the one instance, and Caddy routes by host name:
+
+- `domain` (for example `investor-game.utrakme.com`) serves the UI. The UI calls `/api` on its own host, as it does locally.
+- `api_domain` (for example `investor-game-api.utrakme.com`) serves only `/api/*`, for direct clients such as Postman or scripts. Any other path redirects to the UI. Requests on either host take the same Caddy → nginx → api path, so the API's proxy settings and rate limits behave the same way.
+
+What's created and where:
+
+- **Infrastructure.** Terraform in `infra/aws/` creates:
+  - a small VPC;
+  - the instance, with an Elastic IP;
+  - an encrypted data volume, snapshotted daily (7 kept);
+  - ECR repositories for the two images;
+  - IAM roles;
+  - an EC2 auto-recover alarm;
+  - optionally, Route 53 A records for both host names.
+- **Runtime config.** `docker-compose.aws.yml` and `docker/Caddyfile` are the runtime config. `scripts/aws-deploy.sh` copies them to the instance on every deploy.
+- **Providers.** The API runs with `NODE_ENV=production`, `THINKING_PROVIDER=anthropic` and `DECISION_PROVIDER=jev`. Ollama and Laya are not deployed.
+- **Access.** Only ports 80 and 443 are open. There is no SSH, and shell access is through AWS Systems Manager.
+- **Secrets.** Secrets live in SSM Parameter Store, never in Terraform state, user data or images.
+- **Limits.** There is one instance and one API replica, as SQLite requires. A deploy restarts the containers, which causes roughly 10–20 s of 502s.
+
+**Cost.** Roughly $15–25/month, plus LLM usage:
+
+- t4g.small: about $12;
+- 20 GB root and 10 GB data gp3: about $2.50;
+- public IPv4: about $3.60;
+- snapshots and ECR: about $1.
+
+A public URL can drive LLM spend, so set spend limits in the Anthropic and TypeSafe consoles.
+
+### Prerequisites
+
+- An AWS account and credentials for the AWS CLI v2.
+- Terraform ≥ 1.6.
+- Docker with Buildx.
+- `git`, `python3` and `curl`.
+- The Session Manager plugin for the AWS CLI, needed only for shell access.
+- Two host names: one for the UI and one for the API. If their DNS is in Route 53, the records are created for you.
+- An Anthropic API key and a TypeSafe (Jev) API key.
+
+Images are built for the instance's CPU, `linux/arm64` on the default Graviton instance. On Apple Silicon this is a native build; on x86 it is emulated and slower. To use an x86 instance instead, set `instance_type = "t3.small"`. The deploy script picks the platform from Terraform's `image_platform` output.
+
+### First deploy
+
+```bash
+# 1. Infrastructure
+cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars   # set region, domain, api_domain, optional route53_zone_id
+terraform -chdir=infra/aws init
+terraform -chdir=infra/aws apply
+
+# 2. DNS (skip if route53_zone_id is set): point A records for domain and api_domain at this IP, then wait until they resolve
+terraform -chdir=infra/aws output -raw public_ip
+
+# 3. Secrets: SecureString parameters under the ssm_prefix output (/investor-game/prod/ by default)
+REGION=$(terraform -chdir=infra/aws output -raw region)
+PREFIX=$(terraform -chdir=infra/aws output -raw ssm_prefix)
+aws ssm put-parameter --region "$REGION" --type SecureString --name "${PREFIX}COOKIE_SECRET" --value "$(openssl rand -base64 48)"
+aws ssm put-parameter --region "$REGION" --type SecureString --name "${PREFIX}ANTHROPIC_API_KEY" --value 'sk-ant-...'
+aws ssm put-parameter --region "$REGION" --type SecureString --name "${PREFIX}TYPESAFE_API_KEY" --value '...'
+
+# 4. Build, push and deploy (from a clean checkout); waits until https://<domain>/api/health is green
+scripts/aws-deploy.sh
+```
+
+The instance needs a minute or two after `apply` to install Docker and mount the data volume. If the deploy reports that the instance is not reachable through SSM, or that the data volume is not mounted, wait and run it again.
+
+Caddy requests a certificate for each host name on the first deploy. Each name needs to already resolve to the instance, and Caddy retries automatically until it does.
+
+Every parameter under the prefix is passed to the API's environment. You can add other overrides there as well, for example `LOG_LEVEL`. Parameter values cannot contain a single quote or a newline.
+
+**CSRF (optional).** CSRF is off by default. To turn it on, add two parameters, then deploy a fresh build:
+
+```bash
+aws ssm put-parameter --region "$REGION" --type String --name "${PREFIX}CSRF_ENABLED" --value true
+aws ssm put-parameter --region "$REGION" --type SecureString --name "${PREFIX}CSRF_SECRET" --value "$(openssl rand -base64 48)"
+```
+
+The deploy script bakes this setting into the web image and passes the same value to the API, so the two always match. Because the web image is built with the setting, an older tag built with the opposite value will not match. After changing it, push a new commit and deploy that; don't roll back across the change.
+
+**Sentry (optional).** Errors and traces go to the `harut-46` org: project `investor-api` for the API and `investor-web` for the UI. Each project's DSN is in its Client Keys settings. Add the two DSNs as parameters, then deploy a fresh build:
+
+```bash
+aws ssm put-parameter --region "$REGION" --type String --name "${PREFIX}SENTRY_DSN" --value 'https://...investor-api DSN'
+aws ssm put-parameter --region "$REGION" --type String --name "${PREFIX}SENTRY_WEB_DSN" --value 'https://...investor-web DSN'
+```
+
+The API reads `SENTRY_DSN` at runtime. The web DSN is baked into the web image, the same way the CSRF setting is. Both report the image tag as their release. To make production stack traces from the UI readable, export `SENTRY_AUTH_TOKEN` (an org token with the `project:releases` scope) before you run `scripts/aws-deploy.sh`. The web build then uploads hidden source maps for that release and deletes them from the image. The token is passed as a BuildKit secret, so it never ends up in an image layer. Locally, set `SENTRY_DSN` in `.env` and `VITE_SENTRY_DSN` in `apps/web/.env.local`. If they are unset, the SDKs stay off.
+
+### Redeploy, roll back, rotate secrets
+
+```bash
+scripts/aws-deploy.sh                 # build and deploy HEAD (tag = short commit SHA)
+scripts/aws-deploy.sh --tag <sha>     # deploy an image already in ECR, e.g. to roll back; no build
+scripts/aws-deploy.sh --allow-dirty   # build uncommitted changes (tagged <sha>-dirty-<timestamp>)
+```
+
+At the end of each deploy, the script prints the previous tag, which is the rollback target. ECR keeps the last 20 tags.
+
+If the new version is not healthy within 2 minutes, the script exits non-zero and prints the API's logs. The broken version stays live until you roll back with `--tag`.
+
+To rotate a secret, run `aws ssm put-parameter --overwrite ...` and then redeploy, for example with `--tag <current tag>`. No Terraform change is needed. If a required parameter is missing, the deploy stops before it touches the running containers.
+
+### Operating
+
+```bash
+INSTANCE=$(terraform -chdir=infra/aws output -raw instance_id)
+aws ssm start-session --region "$REGION" --target "$INSTANCE"     # shell on the instance
+# on the instance:
+sudo -i
+cd /opt/investor && docker compose ps
+docker compose logs --tail 200 api          # also: web, caddy
+```
+
+On the instance, the paths are:
+
+- `/opt/investor`: the stack's files, including a root-only `.env`;
+- `/srv/investor/data`: the database;
+- `/srv/investor/caddy`: the certificates;
+- `/var/log/cloud-init-output.log`: the first-boot log.
+
+**Restore from a snapshot.** Snapshots are named after the `<project>-<env>-data` volume, with tag `SnapshotCreator=dlm`. The new volume keeps the filesystem label, so it mounts without any changes.
+
+1. In the EC2 console (Snapshots), create a volume from the snapshot you want. Put it in the instance's availability zone, as gp3 and encrypted.
+2. Stop the instance, detach the current data volume, attach the new one as `/dev/sdf`, then start the instance.
+3. Point Terraform at the new volume, then re-apply its tags so daily snapshots continue:
+
+   ```bash
+   terraform -chdir=infra/aws state rm aws_volume_attachment.data aws_ebs_volume.data
+   terraform -chdir=infra/aws import aws_ebs_volume.data vol-NEW
+   terraform -chdir=infra/aws import aws_volume_attachment.data /dev/sdf:vol-NEW:$INSTANCE
+   terraform -chdir=infra/aws apply
+   ```
+
+4. Delete the old volume when you no longer need it.
+
+**Replace the instance**, for example to pick up a newer AMI or an edited `cloud-init.yaml`, with `terraform -chdir=infra/aws apply -replace=aws_instance.app`, then `scripts/aws-deploy.sh --tag <current tag>`. The data volume and the Elastic IP are kept.
+
+**Tear down.** The data volume has `prevent_destroy`, so `terraform destroy` refuses to delete it. To tear down deliberately:
+
+1. Run `terraform -chdir=infra/aws state rm aws_ebs_volume.data`. This keeps the volume outside Terraform.
+2. Run `terraform -chdir=infra/aws destroy`.
+3. Delete the volume, the snapshots and the SSM parameters by hand if you no longer want them.
+
+**Terraform state.** State lives in S3 at `s3://terraform-state-harut/investor-game/prod/terraform.tfstate` (see `infra/aws/backend.tf`). The bucket is versioned and encrypted, and S3-native locking (`use_lockfile`) stops two applies from running at once. To use your own bucket, edit `backend.tf` and run `terraform -chdir=infra/aws init -migrate-state`.
+
 ## Scripts (run from the repo root)
 
 | Script                      | What it does                                                            |
@@ -147,7 +305,8 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 | `TRUST_PROXY`       | `server.trustProxy` (`false`, a hop count or a comma list; not `true`) |
 | `CORS_ORIGINS`      | `cors.origins` (a comma-separated list of exact origins; no `*`)       |
 | `DATABASE_FILE`     | `database.file` (relative to the repo root, or `:memory:`)             |
-| `LOG_LEVEL`         | `logging.level`                                                        |
+| `LOG_LEVEL`         | `logging.level` (unset: `debug` in development, `info` otherwise)      |
+| `LOG_LLM_CONTENT`   | `logging.llmContent` (`true` logs LLM prompts/responses; debug only)   |
 | `APP_CONFIG_PATH`   | Path to an alternative config file                                     |
 | `THINKING_PROVIDER` | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)              |
 | `DECISION_PROVIDER` | `llm.decision.provider` (`laya`, `jev` or `fake`)                      |
@@ -157,7 +316,31 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 | `TYPESAFE_API_KEY`  | Required when the decision provider is `jev`                           |
 | `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one       |
 
-Invalid configuration stops startup with a list of every problem. Secret values are never printed.
+Invalid configuration stops startup with a list of every problem, written as a `fatal` log line. Secret values are never printed.
+
+## Logging
+
+The API logs structured JSON to stdout (pretty-printed in development) through one pino logger, built by `LoggerFactory` and injected everywhere; `console` is not used (lint enforces it).
+
+- **Level:** `LOG_LEVEL`, else `debug` in development and `info` otherwise.
+- **Request id:** every line written while a request is handled carries `requestId` (the `X-Request-Id` value), including lines from providers, the brain and repositories, via `AsyncLocalStorage`.
+- **Redaction:** `Cookie`, `Set-Cookie`, `Authorization`, `X-CSRF-Token` and `X-Api-Key` headers, and fields named `password`, `token`, `accessToken`, `refreshToken`, `secret`, `apiKey`, `api_key` or `authorization` (top level or one level down) are logged as `[Redacted]`. Don't log config or secrets objects.
+- **Sentry:** with `SENTRY_DSN` set, `info`/`warn`/`error` lines also go to Sentry Logs (health-probe request lines excepted), and `error`/`fatal` lines become Sentry error events, tagged `request_id`. Errors reach Sentry only through the logger, so a failure is reported once. SDK v11 has Sentry Logs on by default (there is no `enableLogs` option); see `apps/api/src/monitoring/SentryOptions.ts`.
+
+**LLM calls.** Every call to Anthropic, Ollama, Jev and Laya is logged by `LlmCallLogger`, so call sites log nothing themselves (the fake providers log nothing). Each line has `provider`, `operation` (`generate` for thinking, `decide` for decisions, `ping` for health probes), `model` and, inside a request, `requestId`. The backend's request id is `anthropicRequestId` for Anthropic and `providerRequestId` for the others (Jev/Laya's `x-typesafe-request-id`; Ollama sends none).
+
+| Event (`event` / message) | Level | Fields                                                                                                                                                                                                                                                                           |
+| ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm.call`                | info  | `maxTokens`, `temperature`, `effort`, `fallbacks` (thinking only), `usage` (input, output, cache read/write, total tokens), `costUsd`, `latencyMs`, `attempts`, `stopReason`, the request id, `requestedModel` after a fallback. Pings log at debug                              |
+| `llm.rate_limited`        | warn  | A 429 on one attempt: `attempt`, `retryAfterSeconds`, `retryAfterMs`, the request id                                                                                                                                                                                             |
+| `llm.overloaded`          | warn  | A 529 on one attempt, same fields                                                                                                                                                                                                                                                |
+| `llm.retry`               | warn  | `attempt` about to start and `reason` (`status_429`, `timeout`, `connection`, `invalid_json`, …)                                                                                                                                                                                 |
+| `llm.timeout`             | warn  | `attempt`, `timeoutMs`                                                                                                                                                                                                                                                           |
+| `llm.call_failed`         | error | After all retries: `errorType` (SDK error class, or `Refusal` with `category`), `status`, `attempts`, `latencyMs`, `err`. Becomes a Sentry error event. A failed `ping` logs at warn instead: `/api/health` already reports it, and an outage must not open an event every probe |
+
+`costUsd` is an estimate from the `llm.pricing` table in `config/app.config.json` (USD per million tokens, per model); an unpriced model logs `costUsd: null` and one warning. Ollama and Laya are self-hosted, so they always log `costUsd: null` without a warning. Jev is priced like Anthropic once its model has an entry. Jev reports the version it resolved (`jev-latest` is served as e.g. `jev-1.13.0`, logged as `model`, with `requestedModel: "jev-latest"`); a price for the configured name covers every version, and a version's own entry wins. For example: `"jev-latest": { "inputPerMTok": …, "outputPerMTok": …, "cacheReadPerMTok": 0, "cacheWritePerMTok": 0 }`.
+
+`LOG_LLM_CONTENT=true` adds `prompt` and `response` to these lines: the system prompt, messages and reply text for thinking calls, and the `state`, `questions` and `answers` for decisions. They hold players' text, so use it for local debugging only; Sentry drops them in production anyway.
 
 Game settings live in the `game` section and have no environment overrides:
 
@@ -425,7 +608,7 @@ npx newman run postman/investor-api.postman_collection.json -e postman/local.pos
 | CSRF            | **Off by default** (`security.csrf.enabled` / `CSRF_ENABLED`). When on: a signed double-submit token (`csrf-csrf`), HMAC-bound to the player ID, required on POST/PUT/PATCH/DELETE. When off, cross-site writes are still blocked by `SameSite=Lax` cookies, JSON-only bodies and the CORS allowlist |
 | Input           | Only `application/json` bodies on POST/PUT/PATCH, a 100 KB body limit, and strict zod validation that rejects unknown fields                                                                                                                                                                         |
 | Abuse           | Per-IP rate limits: a global limit, plus a stricter one for mutating requests. `X-Forwarded-For` is trusted only when `server.trustProxy` is configured                                                                                                                                              |
-| Errors and logs | No stack traces or internal messages in production responses. Cookies, authorization and CSRF headers are redacted from logs                                                                                                                                                                         |
+| Errors and logs | No stack traces or internal messages in production responses. Cookies, authorization, CSRF and API-key headers, and secret-named fields, are redacted from logs (see Logging)                                                                                                                        |
 
 ### Contract for the web client
 

@@ -46,7 +46,13 @@ The decision provider SHALL return one answer per question name, in a provider-n
 - **noul**: the probability of yes (0–1)
 - **score**: the expected score, a confidence (0–1) and probabilities per level
 
-Each result MUST also report the provider name, the model the backend reports, input token usage and latency in milliseconds. Provider-specific response fields MUST NOT leak into these types.
+Each result MUST also report:
+- the provider name;
+- the model the backend reports;
+- token usage: input tokens, and output tokens when the backend reports them, otherwise 0;
+- latency in milliseconds.
+
+Provider-specific response fields MUST NOT leak into these types.
 
 #### Scenario: Mixed question set
 - **WHEN** the caller asks a choice question `reaction`, a noul question `good_deal` and a score question `accept` over the same state
@@ -56,6 +62,10 @@ Each result MUST also report the provider name, the model the backend reports, i
 - **WHEN** the backend returns a choice label that is not among the question's criteria
 - **THEN** the call fails with `PROVIDER_BAD_RESPONSE`
 
+#### Scenario: Output tokens reported
+- **WHEN** the backend reports 420 input and 12 output tokens
+- **THEN** the result's usage shows 420 input tokens and 12 output tokens
+
 ### Requirement: Parallel requests
 The decision provider SHALL run several independent requests concurrently and return their results in request order. If any request fails, the whole call MUST fail with that request's error.
 
@@ -64,11 +74,18 @@ The decision provider SHALL run several independent requests concurrently and re
 - **THEN** the requests run concurrently and the results come back in the same order as the requests
 
 ### Requirement: Failure mapping
-Connection failures, timeouts, rate limiting (429), overload (529) and 5xx errors from the decision backend SHALL surface as `PROVIDER_UNAVAILABLE` (HTTP 503). Authentication failures (401/403) SHALL also surface as `PROVIDER_UNAVAILABLE`, with a log entry that points at the API key without containing it. Request validation errors reported by the backend (422) and malformed responses SHALL surface as `PROVIDER_BAD_RESPONSE` (HTTP 502). Configured timeouts and retry limits MUST be enforced.
+The following failures of the decision backend SHALL surface as `PROVIDER_UNAVAILABLE` (HTTP 503):
+- connection failures and timeouts;
+- rate limiting (429), overload (529) and other 5xx errors;
+- authentication failures (401/403). These MUST also write a `warn` log entry that points at the API key without containing it.
+
+Request validation errors reported by the backend (422) and malformed responses SHALL surface as `PROVIDER_BAD_RESPONSE` (HTTP 502).
+
+Configured timeouts and retry limits MUST be enforced. Every final failure MUST be logged once as `llm.call_failed` at `error` (see llm-call-logging), and the provider MUST NOT log the same failure again.
 
 #### Scenario: Laya not running
 - **WHEN** laya-serve is not reachable and a decision request is made
-- **THEN** the call fails with `PROVIDER_UNAVAILABLE`
+- **THEN** the call fails with `PROVIDER_UNAVAILABLE`, and exactly one `error` line describes the failure
 
 ### Requirement: Reachability check
 The decision provider SHALL expose a reachability check that confirms the backend answers (and, for Jev, that the key is accepted), without running a judgment. The check MUST time out within 3 seconds.

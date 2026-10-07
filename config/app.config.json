@@ -23,7 +23,7 @@
     "file": "./data/game.sqlite"
   },
   "logging": {
-    "level": "info"
+    "llmContent": false
   },
   "llm": {
     "thinking": {
@@ -67,7 +67,27 @@
         "fake": {}
       }
     },
-    "healthCacheMs": 30000
+    "healthCacheMs": 30000,
+    "pricing": {
+      "claude-opus-5-5": {
+        "inputPerMTok": 4,
+        "outputPerMTok": 20,
+        "cacheReadPerMTok": 0.2,
+        "cacheWritePerMTok": 5
+      },
+      "claude-sonnet-5-5": {
+        "inputPerMTok": 2,
+        "outputPerMTok": 10,
+        "cacheReadPerMTok": 0.2,
+        "cacheWritePerMTok": 2.5
+      },
+      "claude-haiku-4-5": {
+        "inputPerMTok": 1,
+        "outputPerMTok": 5,
+        "cacheReadPerMTok": 0.1,
+        "cacheWritePerMTok": 1.25
+      }
+    }
   },
   "game": {
     "currency": "EUR",

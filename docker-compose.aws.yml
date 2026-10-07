@@ -1,0 +1,69 @@
+# The AWS stack (see README "Deploy to AWS"). scripts/aws-deploy.sh copies this file and docker/Caddyfile to
+# /opt/investor on the instance and runs it there; it is not meant for `docker compose up` on a laptop.
+#
+# Differences from docker-compose.yml: prebuilt ECR images instead of local builds, Caddy terminates HTTPS
+# and is the only service with host ports, the database lives on the EBS data volume, and the API is
+# pinned to the production topology (hosted providers, the public origin, two trusted proxy hops).
+#
+# Set by the deploy in /opt/investor/.env: ECR_REGISTRY, IMAGE_TAG, DOMAIN, API_DOMAIN, CSRF_ENABLED and the secrets
+# from SSM. Compose reads .env for interpolation; env_file passes the secrets to the api container.
+
+name: investor-game
+
+services:
+  api:
+    image: ${ECR_REGISTRY:?}/investor-game/api:${IMAGE_TAG:?}
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      DATABASE_FILE: /app/data/game.sqlite
+      # client → Caddy → nginx → api: Caddy sets X-Forwarded-For, nginx appends Caddy's address.
+      TRUST_PROXY: '2'
+      CORS_ORIGINS: https://${DOMAIN:?}
+      THINKING_PROVIDER: anthropic
+      DECISION_PROVIDER: jev
+      # Must match VITE_CSRF_ENABLED baked into the web image; the deploy sets both from one value.
+      CSRF_ENABLED: ${CSRF_ENABLED:-}
+      # SENTRY_DSN comes from SSM via .env; the release matches the web build's, so both tie to one deploy.
+      SENTRY_RELEASE: ${IMAGE_TAG:?}
+    volumes:
+      - /srv/investor/data:/app/data
+    init: true
+    restart: unless-stopped
+    # Above the API's 10 s shutdownTimeoutMs, so in-flight requests can finish.
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  web:
+    image: ${ECR_REGISTRY:?}/investor-game/web:${IMAGE_TAG:?}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.11.6-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?}
+      API_DOMAIN: ${API_DOMAIN:?}
+    ports:
+      - 80:80
+      - 443:443
+      - 443:443/udp
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account on the data volume: an instance replacement reuses them.
+      - /srv/investor/caddy:/data
+    depends_on:
+      - web

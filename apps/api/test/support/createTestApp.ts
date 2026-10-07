@@ -1,4 +1,4 @@
-import { pino } from 'pino';
+import { pino, type Logger } from 'pino';
 import { Container } from '../../src/container/Container.js';
 import type { Controller } from '../../src/http/controllers/Controller.js';
 import type { DecisionProvider } from '../../src/llm/decision/DecisionProvider.js';
@@ -13,12 +13,13 @@ export function createTestApp(
     extraControllers?: Controller[];
     thinkingProvider?: ThinkingProvider;
     decisionProvider?: DecisionProvider;
+    logger?: Logger;
   } = {},
 ) {
-  const { clock, extraControllers, thinkingProvider, decisionProvider, ...configOverrides } = options;
+  const { clock, extraControllers, thinkingProvider, decisionProvider, logger, ...configOverrides } = options;
   // Fake providers by default (testConfig selects "fake"), so tests never touch the network.
   const container = new Container(testConfig(configOverrides), {
-    logger: pino({ level: 'silent' }),
+    logger: logger ?? pino({ level: 'silent' }),
     ...(clock ? { clock } : {}),
     ...(extraControllers ? { extraControllers } : {}),
     ...(thinkingProvider ? { thinkingProvider } : {}),

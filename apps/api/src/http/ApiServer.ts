@@ -13,6 +13,7 @@ import { JsonContentTypeGuard } from './middleware/JsonContentTypeGuard.js';
 import { NotFoundMiddleware } from './middleware/NotFoundMiddleware.js';
 import type { PlayerSessionMiddleware } from './middleware/PlayerSessionMiddleware.js';
 import { RateLimiters } from './middleware/RateLimiters.js';
+import { RequestContextMiddleware } from './middleware/RequestContextMiddleware.js';
 import { RequestIdMiddleware } from './middleware/RequestIdMiddleware.js';
 import { SecurityHeaders } from './middleware/SecurityHeaders.js';
 
@@ -52,12 +53,14 @@ export class ApiServer {
     app.set('trust proxy', config.server.trustProxy);
 
     app.use(new RequestIdMiddleware().handle);
+    app.use(new RequestContextMiddleware().handle);
     app.use(
       pinoHttp({
         logger,
         genReqId: (req: IncomingMessage) => (req as Request).requestId,
-        customLogLevel: (_req, res, error) =>
-          error || res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info',
+        // At most warn: the error handler logs the failure itself at `error`, which is what becomes the Sentry
+        // event. An `error` request line would add a second event for the same failure.
+        customLogLevel: (_req, res, error) => (error || res.statusCode >= 400 ? 'warn' : 'info'),
       }),
     );
     app.use(SecurityHeaders.create(config.isProduction));

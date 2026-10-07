@@ -45,7 +45,7 @@ export class FakeDecisionProvider implements DecisionProvider {
       provider: this.name,
       model: 'fake',
       answers: answers as DecisionResult<Q>['answers'],
-      usage: { inputTokens: 0 },
+      usage: { inputTokens: 0, outputTokens: 0 },
       latencyMs: 0,
     };
   }

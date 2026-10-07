@@ -61,6 +61,7 @@ const ENV_OVERRIDES: readonly EnvOverride[] = [
   { path: 'cors.origins', env: 'CORS_ORIGINS', parse: commaList },
   { path: 'database.file', env: 'DATABASE_FILE' },
   { path: 'logging.level', env: 'LOG_LEVEL' },
+  { path: 'logging.llmContent', env: 'LOG_LLM_CONTENT', parse: booleanFlag },
   { path: 'security.csrf.enabled', env: 'CSRF_ENABLED', parse: booleanFlag },
   { path: 'llm.thinking.provider', env: 'THINKING_PROVIDER' },
   { path: 'llm.decision.provider', env: 'DECISION_PROVIDER' },

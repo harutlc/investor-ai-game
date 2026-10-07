@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --conditions=development src/main.ts",
+    "dev": "tsx watch --conditions=development --import ./src/instrument.ts src/main.ts",
     "build": "tsc -b tsconfig.build.json",
-    "start": "node dist/main.js",
+    "start": "node --enable-source-maps --import ./dist/instrument.js dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
@@ -15,6 +15,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
     "@investor/shared": "workspace:*",
+    "@sentry/node": "^11.4.0",
     "@typesafe-ai/sdk": "^0.6.0",
     "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",

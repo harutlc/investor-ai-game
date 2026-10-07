@@ -1,0 +1,74 @@
+#cloud-config
+# Rendered by compute.tf (templatefile). Runs once per instance: installs Docker + Compose, configures ECR
+# pulls, and mounts the data volume at /srv/investor. Deploys (scripts/aws-deploy.sh) do everything else.
+
+package_update: true
+packages:
+  - docker
+  - amazon-ecr-credential-helper
+
+write_files:
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "5" }
+      }
+
+  # `docker compose pull` (run as root by SSM) authenticates to ECR with the instance role.
+  - path: /root/.docker/config.json
+    permissions: '0600'
+    content: |
+      { "credsStore": "ecr-login" }
+
+  - path: /usr/local/sbin/investor-bootstrap
+    permissions: '0750'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # --- Compose v2 CLI plugin, pinned and checksum-verified ---
+      COMPOSE_VERSION=v5.6.0
+      case "$(uname -m)" in
+        aarch64) arch=aarch64; sha=733ec76717ceb59052a9609b9dadfb523b2df8eab57a54212872d10a58078ea2 ;;
+        x86_64)  arch=x86_64;  sha=40343e21ca777173e69cff5dbafeb37c6f81f3b0d57d9e597f036e95eb63e76a ;;
+        *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+      esac
+      plugin=/usr/local/lib/docker/cli-plugins/docker-compose
+      mkdir -p "$(dirname "$plugin")"
+      curl -fsSL -o "$plugin.tmp" \
+        "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-$arch"
+      echo "$sha  $plugin.tmp" | sha256sum -c -
+      chmod 0755 "$plugin.tmp"
+      mv "$plugin.tmp" "$plugin"
+
+      systemctl enable --now docker
+
+      # --- Data volume: wait for the attachment (it happens after the instance starts) ---
+      device=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${data_volume_id_nodash}
+      for _ in $(seq 1 120); do
+        [ -e "$device" ] && break
+        sleep 5
+      done
+      [ -e "$device" ] || { echo "data volume ${data_volume_id} never appeared" >&2; exit 1; }
+
+      # Format only a blank volume: an existing one (or one restored from a snapshot) keeps its data.
+      if ! blkid "$device" >/dev/null 2>&1; then
+        mkfs.ext4 -L investor-data "$device"
+      fi
+
+      # Mount by label, so a volume restored from a snapshot mounts without editing fstab.
+      mkdir -p /srv/investor
+      if ! grep -q 'LABEL=investor-data' /etc/fstab; then
+        echo 'LABEL=investor-data /srv/investor ext4 defaults,nofail,noatime 0 2' >> /etc/fstab
+      fi
+      mountpoint -q /srv/investor || mount /srv/investor
+
+      # The api image runs as `node` (uid 1000); Caddy runs as root and keeps its certificates in caddy/.
+      mkdir -p /srv/investor/data /srv/investor/caddy /opt/investor
+      chown 1000:1000 /srv/investor/data
+      chmod 0700 /opt/investor
+
+runcmd:
+  - [/usr/local/sbin/investor-bootstrap]
