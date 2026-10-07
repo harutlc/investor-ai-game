@@ -88,5 +88,6 @@
   - on the instance, `aws ssm get-parameter --name /other/param` is denied;
   - `grep` of `terraform.tfstate` for the Anthropic key finds nothing;
   - `ls -l /opt/investor/.env` shows `-rw------- root`.
-- [ ] 7.3 Data durability. Play a turn, redeploy the same commit with `--tag`, and confirm the game is still listed. Then run `terraform apply -replace=aws_instance.app`, redeploy, and confirm the game is still listed. After 24 h, confirm that a DLM snapshot exists.
-- [ ] 7.4 Behavior checks. Play a full game in a browser and confirm the `__Host-` cookie is set. Confirm that a slow turn (over 60 s, where one happens or is simulated by a thinking timeout) returns without a 504. Roll back to an earlier tag and confirm health is green on that tag.
+- [x] 7.3 Data durability. Play a turn, redeploy the same commit with `--tag`, and confirm the game is still listed. Then run `terraform apply -replace=aws_instance.app`, redeploy, and confirm the game is still listed. After 24 h, confirm that a DLM snapshot exists.
+  - Accepted by the operator on partial evidence (2026-10-07). The DLM snapshot `snap-04aac27abf7c331a9` of `vol-01a5f6c7b0b99e122` was taken at 2026-10-07 03:15 UTC by policy `policy-0cad8645906b56ebe` and is `completed`. Data survived the `--tag` rollback redeploy in 7.4. **Not run:** the `terraform apply -replace=aws_instance.app` instance-replacement check, so the "Data survives instance replacement" scenario is still untested in AWS.
+- [x] 7.4 Behavior checks. Play a full game in a browser and confirm the `__Host-` cookie is set. Confirm that a slow turn (over 60 s, where one happens or is simulated by a thinking timeout) returns without a 504. Roll back to an earlier tag and confirm health is green on that tag.
