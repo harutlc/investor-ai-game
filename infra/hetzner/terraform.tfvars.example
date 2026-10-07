@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. The Hetzner API token is NOT set here:
+# export HCLOUD_TOKEN=... in your shell (see README "Deploy to Hetzner").
+
+# Separate subdomains from the AWS stack, in the same Route 53 zone.
+domain          = "investor-game-hz.example.com"
+api_domain      = "investor-game-api-hz.example.com"
+route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+# Your public key(s), e.g. the contents of ~/.ssh/id_ed25519.pub
+ssh_public_keys = ["ssh-ed25519 AAAA... you@laptop"]
+
+# Where you connect from. Your current IPv4: curl -4 https://ifconfig.me  (then append /32)
+ssh_allowed_cidrs = ["203.0.113.7/32"]
+
+# environment           = "prod"
+# location              = "nbg1"      # nbg1, fsn1 or hel1 (ARM servers)
+# server_type           = "cax11"     # 2 vCPU ARM, 4 GB; cpx11 for x86
+# aws_region            = "eu-central-1"
+# data_volume_size_gb   = 10
+# backup_retention_days = 14
