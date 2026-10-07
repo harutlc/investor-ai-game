@@ -66,7 +66,7 @@ describe('a decision backend that is down during a game turn', () => {
       fetch,
       llmCalls,
     });
-    const { app } = createTestApp({ logger, decisionProvider: laya, csrf: false });
+    const { app } = await createTestApp({ logger, decisionProvider: laya, csrf: false });
     const agent = request.agent(app);
     const game = (await agent.post('/api/games').send({ personaId: 'greedy-shark', pitch: PITCH })).body as {
       id: string;

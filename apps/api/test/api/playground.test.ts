@@ -10,7 +10,7 @@ import { ProviderUnavailableError } from '../../src/llm/errors/ProviderUnavailab
 import { FakeThinkingProvider } from '../../src/llm/thinking/FakeThinkingProvider.js';
 import { createTestApp } from '../support/createTestApp.js';
 
-type App = ReturnType<typeof createTestApp>['app'];
+type App = Awaited<ReturnType<typeof createTestApp>>['app'];
 
 /** A browser-like agent with a player session and a CSRF token. */
 async function browser(app: App) {
@@ -28,7 +28,7 @@ const conversation = {
 
 describe('playground: thinking text', () => {
   it('returns the active provider reply', async () => {
-    const { app } = createTestApp({ thinkingProvider: new FakeThinkingProvider(['30% or nothing.']) });
+    const { app } = await createTestApp({ thinkingProvider: new FakeThinkingProvider(['30% or nothing.']) });
     const res = await (await browser(app)).post('/api/dev/thinking/text', conversation);
     expect(res.status).toBe(200);
     expect(PlaygroundTextResponseSchema.parse(res.body)).toMatchObject({
@@ -38,7 +38,7 @@ describe('playground: thinking text', () => {
   });
 
   it('rejects an empty conversation', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await (await browser(app)).post('/api/dev/thinking/text', { messages: [] });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
@@ -54,7 +54,7 @@ describe('playground: thinking JSON', () => {
 
   it('returns data that conforms to the posted schema', async () => {
     const thinkingProvider = new FakeThinkingProvider(['{"options":["Counter at 20%","Walk away"]}']);
-    const { app } = createTestApp({ thinkingProvider });
+    const { app } = await createTestApp({ thinkingProvider });
     const res = await (await browser(app)).post('/api/dev/thinking/json', { ...conversation, schema });
     expect(res.status).toBe(200);
     expect(PlaygroundJsonResponseSchema.parse(res.body).data).toEqual({
@@ -64,13 +64,13 @@ describe('playground: thinking JSON', () => {
 
   it('enforces the posted schema through the retry path', async () => {
     const thinkingProvider = new FakeThinkingProvider(['{"options":[1]}', '{"options":["ok"]}']);
-    const { app } = createTestApp({ thinkingProvider });
+    const { app } = await createTestApp({ thinkingProvider });
     const res = await (await browser(app)).post('/api/dev/thinking/json', { ...conversation, schema });
     expect(res.body.data).toEqual({ options: ['ok'] });
   });
 
   it('rejects an unusable JSON Schema with 400', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await (
       await browser(app)
     ).post('/api/dev/thinking/json', { ...conversation, schema: { type: 'banana' } });
@@ -82,7 +82,7 @@ describe('playground: thinking JSON', () => {
     const properties = Object.fromEntries(
       Array.from({ length: 51 }, (_, i) => [`p${i}`, { type: 'string' }]),
     );
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await (
       await browser(app)
     ).post('/api/dev/thinking/json', {
@@ -95,7 +95,7 @@ describe('playground: thinking JSON', () => {
   it('rejects a schema one level too deep', async () => {
     let nested: object = { type: 'string' };
     for (let level = 0; level < 11; level++) nested = { type: 'array', items: nested };
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await (
       await browser(app)
     ).post('/api/dev/thinking/json', { ...conversation, schema: nested });
@@ -108,7 +108,7 @@ describe('playground: thinking JSON', () => {
     const schema = `{"items":${'['.repeat(levels)}${']'.repeat(levels)}}`;
     const body = `${JSON.stringify(conversation).slice(0, -1)},"schema":${schema}}`;
     const thinkingProvider = new FakeThinkingProvider();
-    const { app } = createTestApp({ thinkingProvider });
+    const { app } = await createTestApp({ thinkingProvider });
     const res = await (await browser(app)).post('/api/dev/thinking/json', body);
     expect(res.status).toBe(400);
     expect(res.body.error).toMatchObject({ code: 'VALIDATION_ERROR', details: [{ path: 'body.schema' }] });
@@ -121,7 +121,7 @@ describe('playground: decision', () => {
     const decisionProvider = new FakeDecisionProvider([
       { reaction: { type: 'choice', value: 'counter', confidence: 0.8, probabilities: { counter: 0.9 } } },
     ]);
-    const { app } = createTestApp({ decisionProvider });
+    const { app } = await createTestApp({ decisionProvider });
     const res = await (
       await browser(app)
     ).post('/api/dev/decision', {
@@ -142,21 +142,21 @@ describe('playground: decision', () => {
 
 describe('playground: protections and availability', () => {
   it('requires a CSRF token', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await request(app).post('/api/dev/thinking/text').send(conversation);
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('CSRF_INVALID');
   });
 
   it('is not mounted when dev.playground is false', async () => {
-    const { app } = createTestApp({ playground: false });
+    const { app } = await createTestApp({ playground: false });
     const res = await (await browser(app)).post('/api/dev/decision', {});
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
   it('is never mounted in production, even when enabled', async () => {
-    const { app } = createTestApp({ nodeEnv: 'production', playground: true });
+    const { app } = await createTestApp({ nodeEnv: 'production', playground: true });
     const agent = request.agent(app);
     // Production cookies are Secure, so the agent cannot replay them over http: send them explicitly.
     const tokenRes = await agent.get('/api/csrf-token');
@@ -175,7 +175,7 @@ describe('playground: protections and availability', () => {
     const thinkingProvider = new FakeThinkingProvider([
       new ProviderUnavailableError(undefined, { cause: new Error('connect ECONNREFUSED 10.0.0.5:11434') }),
     ]);
-    const { app } = createTestApp({ thinkingProvider });
+    const { app } = await createTestApp({ thinkingProvider });
     const res = await (await browser(app)).post('/api/dev/thinking/text', conversation);
     expect(res.status).toBe(503);
     expect(res.body.error.code).toBe('PROVIDER_UNAVAILABLE');

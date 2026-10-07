@@ -1,7 +1,6 @@
 import type { ChatRole } from '@investor/shared';
-import { asc, eq, sql } from 'drizzle-orm';
-import type { DrizzleDb } from '../db/Database.js';
-import { messages } from '../db/schema.js';
+import { asc, eq } from 'drizzle-orm';
+import type { Database } from '../db/Database.js';
 
 export interface StoredMessage {
   id: string;
@@ -13,20 +12,30 @@ export interface StoredMessage {
 
 /** Data access for a session's chat transcript. */
 export class MessageRepository {
-  constructor(private readonly db: DrizzleDb) {}
+  constructor(private readonly database: Database) {}
 
-  add(message: StoredMessage): StoredMessage {
-    this.db.insert(messages).values(message).run();
+  async add(message: StoredMessage): Promise<StoredMessage> {
+    const { messages } = this.database.tables;
+    await this.database.query((db) => db.insert(messages).values(message));
     return { ...message };
   }
 
   /** The transcript in creation order; same-millisecond messages keep their insertion order. */
-  listForSession(sessionId: string): StoredMessage[] {
-    return this.db
-      .select()
-      .from(messages)
-      .where(eq(messages.sessionId, sessionId))
-      .orderBy(asc(messages.createdAt), asc(sql`rowid`))
-      .all();
+  async listForSession(sessionId: string): Promise<StoredMessage[]> {
+    const { messages } = this.database.tables;
+    const rows = await this.database.query((db) =>
+      db
+        .select()
+        .from(messages)
+        .where(eq(messages.sessionId, sessionId))
+        .orderBy(asc(messages.createdAt), asc(this.database.insertionOrder(messages))),
+    );
+    return rows.map(({ id, sessionId: session, role, text, createdAt }) => ({
+      id,
+      sessionId: session,
+      role,
+      text,
+      createdAt,
+    }));
   }
 }

@@ -33,7 +33,7 @@ export class DecisionLogger {
     const started = performance.now();
     try {
       const result = await this.provider.decide(request);
-      this.record(context, request, {
+      await this.record(context, request, {
         provider: result.provider,
         model: result.model,
         answers: result.answers,
@@ -42,7 +42,7 @@ export class DecisionLogger {
       });
       return result;
     } catch (error) {
-      this.record(context, request, {
+      await this.record(context, request, {
         provider: this.provider.name,
         model: null,
         answers: null,
@@ -53,7 +53,7 @@ export class DecisionLogger {
     }
   }
 
-  private record(
+  private async record(
     context: DecisionContext,
     request: DecisionRequest,
     outcome: {
@@ -63,9 +63,9 @@ export class DecisionLogger {
       errorCode: string | null;
       latencyMs: number;
     },
-  ): void {
+  ): Promise<void> {
     try {
-      this.logs.add({
+      await this.logs.add({
         id: randomUUID(),
         ...context,
         ...outcome,

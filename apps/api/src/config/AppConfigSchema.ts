@@ -33,6 +33,26 @@ const transport = {
 };
 
 export const THINKING_PROVIDERS = ['ollama', 'anthropic', 'fake'] as const;
+export const DATABASE_DIALECTS = ['sqlite', 'postgres', 'mysql'] as const;
+export type DatabaseDialect = (typeof DATABASE_DIALECTS)[number];
+
+/** URL schemes `DATABASE_URL` may use for each server dialect. */
+const DATABASE_URL_SCHEMES: Record<
+  Exclude<DatabaseDialect, 'sqlite'>,
+  { schemes: string[]; name: string }
+> = {
+  postgres: { schemes: ['postgres:', 'postgresql:'], name: 'a PostgreSQL URL (postgres://…)' },
+  mysql: { schemes: ['mysql:'], name: 'a MySQL URL (mysql://…)' },
+};
+
+/** The URL's scheme, or undefined when it does not parse. Never echoes the URL itself. */
+function urlScheme(value: string): string | undefined {
+  try {
+    return new URL(value).protocol;
+  } catch {
+    return undefined;
+  }
+}
 export const DECISION_PROVIDERS = ['jev', 'laya', 'fake'] as const;
 
 const ThinkingConfigSchema = z
@@ -194,7 +214,11 @@ export const AppConfigSchema = z
       .strict(),
     database: z
       .object({
-        file: z.string(required('a string')).min(1),
+        dialect: z.enum(DATABASE_DIALECTS).default('sqlite'),
+        /** The SQLite file (or `:memory:`); used only by the `sqlite` dialect. */
+        file: z.string(required('a string')).min(1).optional(),
+        /** Connection pool size for the server dialects. */
+        poolMax: z.number().int().positive().max(100).default(10),
       })
       .strict(),
     logging: z
@@ -230,6 +254,8 @@ export const AppConfigSchema = z
         anthropicApiKey: z.string().min(1).optional(),
         typesafeApiKey: z.string().min(1).optional(),
         layaApiKey: z.string().min(1).optional(),
+        /** Connection string for the `postgres` and `mysql` dialects. */
+        databaseUrl: z.string().min(1).optional(),
       })
       .strict(),
   })
@@ -237,7 +263,33 @@ export const AppConfigSchema = z
   // Cross-field rules. zod runs them only once every field above is valid, so these (conditional) problems
   // are reported in a second pass after the basic ones are fixed.
   .superRefine((config, ctx) => {
-    const { secrets, llm, nodeEnv, security } = config;
+    const { secrets, llm, nodeEnv, security, database } = config;
+    if (database.dialect === 'sqlite') {
+      if (!database.file) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'is required when database.dialect is "sqlite"',
+          path: ['database', 'file'],
+        });
+      }
+    } else if (!secrets.databaseUrl) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `is required when database.dialect is "${database.dialect}"`,
+        path: ['secrets', 'databaseUrl'],
+      });
+    } else {
+      // The message names the expected kind of URL only: the value carries the password.
+      const expected = DATABASE_URL_SCHEMES[database.dialect];
+      const scheme = urlScheme(secrets.databaseUrl);
+      if (!scheme || !expected.schemes.includes(scheme)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `must be ${expected.name} when database.dialect is "${database.dialect}"`,
+          path: ['secrets', 'databaseUrl'],
+        });
+      }
+    }
     if (security.csrf.enabled && !secrets.csrfSecret) {
       ctx.addIssue({
         code: 'custom',

@@ -23,33 +23,32 @@ export class GameSessionService {
   ) {}
 
   /** The owned session, or GameNotFoundError. */
-  load(playerId: string, gameId: string): GameSession {
-    const session = this.sessions.findForPlayer(gameId, playerId);
+  async load(playerId: string, gameId: string): Promise<GameSession> {
+    const session = await this.sessions.findForPlayer(gameId, playerId);
     if (!session) throw new GameNotFoundError();
     return session;
   }
 
-  getSession(playerId: string, gameId: string): GameSessionDto {
-    return this.view(this.load(playerId, gameId));
+  async getSession(playerId: string, gameId: string): Promise<GameSessionDto> {
+    return this.view(await this.load(playerId, gameId));
   }
 
   /** The player's games, newest first, as summaries (no transcripts are loaded). */
-  listSessions(playerId: string): GameListDto {
+  async listSessions(playerId: string): Promise<GameListDto> {
+    const sessions = await this.sessions.listForPlayer(playerId);
     return {
-      games: this.sessions
-        .listForPlayer(playerId)
-        .map((session) => this.mapper.toSummary(session, this.persona(session.personaId))),
+      games: sessions.map((session) => this.mapper.toSummary(session, this.persona(session.personaId))),
     };
   }
 
-  getInsights(playerId: string, gameId: string): DecisionInsightsDto {
-    const session = this.load(playerId, gameId);
-    return this.mapper.toInsights(this.decisionLogs.listForSession(session.id));
+  async getInsights(playerId: string, gameId: string): Promise<DecisionInsightsDto> {
+    const session = await this.load(playerId, gameId);
+    return this.mapper.toInsights(await this.decisionLogs.listForSession(session.id));
   }
 
   /** The public view of a session as it is stored now. */
-  view(session: GameSession): GameSessionDto {
-    const latest = this.offers.latest(session.id, 'player');
+  async view(session: GameSession): Promise<GameSessionDto> {
+    const latest = await this.offers.latest(session.id, 'player');
     const lastPlayerOffer: Offer | null = latest
       ? {
           investment: latest.investment,
@@ -62,7 +61,7 @@ export class GameSessionService {
     return this.mapper.toDto(
       session,
       this.persona(session.personaId),
-      this.messages.listForSession(session.id),
+      await this.messages.listForSession(session.id),
       lastPlayerOffer,
     );
   }

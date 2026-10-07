@@ -40,8 +40,8 @@ export class GameController implements Controller {
       .get('/:id/insights', ValidationMiddleware.validate(readSchemas), this.insights);
   }
 
-  private readonly list = (req: Request, res: Response): void => {
-    const body: GameListDto = this.games.listSessions(GameController.playerId(req));
+  private readonly list = async (req: Request, res: Response): Promise<void> => {
+    const body: GameListDto = await this.games.listSessions(GameController.playerId(req));
     GameController.send(res, 200, body);
   };
 
@@ -51,9 +51,10 @@ export class GameController implements Controller {
     GameController.send(res, 201, game);
   };
 
-  private readonly get = (req: Request, res: Response): void => {
+  private readonly get = async (req: Request, res: Response): Promise<void> => {
     const { params } = ValidationMiddleware.validated(res, readSchemas);
-    GameController.send(res, 200, this.games.getSession(GameController.playerId(req), params.id));
+    const game: GameSessionDto = await this.games.getSession(GameController.playerId(req), params.id);
+    GameController.send(res, 200, game);
   };
 
   private readonly turn = async (req: Request, res: Response): Promise<void> => {
@@ -62,9 +63,9 @@ export class GameController implements Controller {
     GameController.send(res, 200, result);
   };
 
-  private readonly insights = (req: Request, res: Response): void => {
+  private readonly insights = async (req: Request, res: Response): Promise<void> => {
     const { params } = ValidationMiddleware.validated(res, readSchemas);
-    const body: DecisionInsightsDto = this.games.getInsights(GameController.playerId(req), params.id);
+    const body: DecisionInsightsDto = await this.games.getInsights(GameController.playerId(req), params.id);
     GameController.send(res, 200, body);
   };
 

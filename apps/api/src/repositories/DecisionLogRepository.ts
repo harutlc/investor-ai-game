@@ -6,10 +6,9 @@ import {
   type DecisionQuestions,
   type DecisionStage,
 } from '@investor/shared';
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import type { DrizzleDb } from '../db/Database.js';
-import { decisionLogs } from '../db/schema.js';
+import type { Database, Tables } from '../db/Database.js';
 
 export interface DecisionLogEntry {
   id: string;
@@ -27,28 +26,35 @@ export interface DecisionLogEntry {
   createdAt: Date;
 }
 
-type Row = typeof decisionLogs.$inferSelect;
+type Row = Tables['decisionLogs']['$inferSelect'];
 
 const AnswersSchema = z.record(z.string(), DecisionAnswerSchema).nullable();
 
 /** Data access for the record of every decision call made for a session. */
 export class DecisionLogRepository {
-  constructor(private readonly db: DrizzleDb) {}
+  constructor(private readonly database: Database) {}
 
-  add(entry: DecisionLogEntry): DecisionLogEntry {
-    this.db.insert(decisionLogs).values(entry).run();
+  async add(entry: DecisionLogEntry): Promise<DecisionLogEntry> {
+    const { decisionLogs } = this.database.tables;
+    await this.database.query((db) => db.insert(decisionLogs).values(entry));
     return structuredClone(entry);
   }
 
   /** Entries ordered by turn, then by creation order within a turn. */
-  listForSession(sessionId: string): DecisionLogEntry[] {
-    return this.db
-      .select()
-      .from(decisionLogs)
-      .where(eq(decisionLogs.sessionId, sessionId))
-      .orderBy(asc(decisionLogs.turn), asc(decisionLogs.createdAt), asc(sql`rowid`))
-      .all()
-      .map((row) => DecisionLogRepository.toEntry(row));
+  async listForSession(sessionId: string): Promise<DecisionLogEntry[]> {
+    const { decisionLogs } = this.database.tables;
+    const rows = await this.database.query((db) =>
+      db
+        .select()
+        .from(decisionLogs)
+        .where(eq(decisionLogs.sessionId, sessionId))
+        .orderBy(
+          asc(decisionLogs.turn),
+          asc(decisionLogs.createdAt),
+          asc(this.database.insertionOrder(decisionLogs)),
+        ),
+    );
+    return rows.map((row) => DecisionLogRepository.toEntry(row));
   }
 
   private static toEntry(row: Row): DecisionLogEntry {
