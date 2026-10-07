@@ -21,6 +21,7 @@ export const REDACTED_FIELDS = [
   'apiKey',
   'api_key',
   'authorization',
+  'databaseUrl',
 ] as const;
 
 export const REDACTED_PATHS: readonly string[] = [

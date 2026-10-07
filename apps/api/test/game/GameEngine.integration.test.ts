@@ -26,10 +26,10 @@ const PITCH: CreateGameRequest['pitch'] = {
 let container: Container;
 afterEach(() => container?.dispose());
 
-function setup(thinkingProvider: ThinkingProvider) {
+async function setup(thinkingProvider: ThinkingProvider) {
   const decisions = new FakeDecisionProvider();
-  ({ container } = createTestApp({ decisionProvider: decisions, thinkingProvider }));
-  return { decisions, playerId: seedPlayer(container.database), engine: container.gameEngine };
+  ({ container } = await createTestApp({ decisionProvider: decisions, thinkingProvider }));
+  return { decisions, playerId: await seedPlayer(container.database), engine: container.gameEngine };
 }
 
 function stageB(
@@ -63,7 +63,7 @@ describe('a full game with the fake providers', () => {
         JSON.stringify({ options: [{ kind: 'message', label: 'Ask why 37%' }] }),
       ],
     );
-    const { decisions, playerId, engine } = setup(voice);
+    const { decisions, playerId, engine } = await setup(voice);
 
     const opened = await engine.startGame(playerId, { personaId: 'greedy-shark', pitch: PITCH });
     expect(GameSessionDtoSchema.safeParse(opened).success).toBe(true);
@@ -115,22 +115,24 @@ describe('a full game with the fake providers', () => {
       'investor',
     ]);
     expect(
-      container.offerRepository
-        .listForSession(opened.id)
-        .map((offer) => [offer.turn, offer.from, offer.equity]),
+      (await container.offerRepository.listForSession(opened.id)).map((offer) => [
+        offer.turn,
+        offer.from,
+        offer.equity,
+      ]),
     ).toEqual([
       [0, 'investor', 40],
       [1, 'player', 25],
       [1, 'investor', 37],
     ]);
 
-    const insights = container.gameSessionService.getInsights(playerId, opened.id);
+    const insights = await container.gameSessionService.getInsights(playerId, opened.id);
     expect(DecisionInsightsDtoSchema.safeParse(insights).success).toBe(true);
     expect(insights.entries.map((entry) => `${entry.turn}${entry.stage}`)).toEqual(['1A', '1A', '1B', '1B']);
   });
 
   it('ends in a walk-away when repeated rejections use up the patience', async () => {
-    const { decisions, playerId, engine } = setup(new UnavailableThinkingProvider());
+    const { decisions, playerId, engine } = await setup(new UnavailableThinkingProvider());
     const opened = await engine.startGame(playerId, { personaId: 'greedy-shark', pitch: PITCH });
 
     const reject = () => {
@@ -147,17 +149,19 @@ describe('a full game with the fake providers', () => {
 
     expect(result.session).toMatchObject({ turn: 5, status: 'walked_away', phase: 'finished', options: [] });
     expect(result.newMessages[1]!.text).toBe("I think we're done here.");
-    expect(container.gameSessionRepository.findForPlayer(opened.id, playerId)?.investorState.patience).toBe(
-      0,
-    );
+    expect(
+      (await container.gameSessionRepository.findForPlayer(opened.id, playerId))?.investorState.patience,
+    ).toBe(0);
   });
 
   it('keeps a game private to its player', async () => {
-    const { playerId, engine } = setup(new UnavailableThinkingProvider());
+    const { playerId, engine } = await setup(new UnavailableThinkingProvider());
     const opened = await engine.startGame(playerId, { personaId: 'generous-angel', pitch: PITCH });
-    const stranger = seedPlayer(container.database);
+    const stranger = await seedPlayer(container.database);
 
-    expect(() => container.gameSessionService.getSession(stranger, opened.id)).toThrow(GameNotFoundError);
+    await expect(container.gameSessionService.getSession(stranger, opened.id)).rejects.toThrow(
+      GameNotFoundError,
+    );
     await expect(
       engine.playTurn(stranger, opened.id, { offer: { investment: 500_000, equity: 15 } }),
     ).rejects.toThrow(GameNotFoundError);

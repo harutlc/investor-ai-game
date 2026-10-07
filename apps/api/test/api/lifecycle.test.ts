@@ -5,7 +5,7 @@ import { createTestApp } from '../support/createTestApp.js';
 
 describe('ApiServer lifecycle', () => {
   it('listens and closes cleanly when idle', async () => {
-    const { container } = createTestApp();
+    const { container } = await createTestApp();
     const server = await container.server.listen(0);
     const { port } = server.address() as AddressInfo;
     const res = await fetch(`http://127.0.0.1:${port}/api/health`);
@@ -15,7 +15,7 @@ describe('ApiServer lifecycle', () => {
   });
 
   it('rejects when an in-flight request outlives the shutdown timeout', async () => {
-    const { container } = createTestApp();
+    const { container } = await createTestApp();
     const server = await container.server.listen(0);
     const { port } = server.address() as AddressInfo;
     // A request whose headers never finish keeps the connection active (not idle).

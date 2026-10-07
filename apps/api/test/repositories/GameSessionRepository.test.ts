@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { PlayerOption } from '@investor/shared';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Database } from '../../src/db/Database.js';
+import type { Database } from '../../src/db/Database.js';
 import { GameSessionRepository } from '../../src/repositories/GameSessionRepository.js';
 import { T0, seedPlayer, sessionFixture } from '../support/gameFixtures.js';
+import { dialectsUnderTest, openTestDatabase } from '../support/testDatabase.js';
 
 const LATER = new Date('2026-10-03T11:00:00.000Z');
 
@@ -11,54 +13,54 @@ let database: Database;
 let repository: GameSessionRepository;
 let playerId: string;
 
-beforeEach(() => {
-  database = new Database(':memory:');
-  repository = new GameSessionRepository(database.db, () => LATER);
-  playerId = seedPlayer(database);
-});
-afterEach(() => database.close());
+describe.each(dialectsUnderTest())('GameSessionRepository (%s)', (dialect) => {
+  beforeEach(async () => {
+    database = await openTestDatabase(dialect);
+    repository = new GameSessionRepository(database, () => LATER);
+    playerId = await seedPlayer(database);
+  });
+  afterEach(() => database.close());
 
-describe('GameSessionRepository', () => {
-  it('creates a session and reads it back unchanged', () => {
-    const session = repository.create(sessionFixture(playerId));
-    const found = repository.findForPlayer(session.id, playerId);
+  it('creates a session and reads it back unchanged', async () => {
+    const session = await repository.create(sessionFixture(playerId));
+    const found = await repository.findForPlayer(session.id, playerId);
     expect(found).toEqual(session);
     expect(found?.investorState.budget).toBe(700_000);
     expect(found?.investorState.patience).toBe(3);
   });
 
-  it('stores a session without an investor offer or scenario', () => {
-    const session = repository.create(sessionFixture(playerId, { currentInvestorOffer: null }));
-    expect(repository.findForPlayer(session.id, playerId)?.currentInvestorOffer).toBeNull();
+  it('stores a session without an investor offer or scenario', async () => {
+    const session = await repository.create(sessionFixture(playerId, { currentInvestorOffer: null }));
+    expect((await repository.findForPlayer(session.id, playerId))?.currentInvestorOffer).toBeNull();
   });
 
-  it('refuses a session for an unknown player', () => {
-    expect(() => repository.create(sessionFixture(randomUUID()))).toThrow();
-    expect(repository.listForPlayer(playerId)).toEqual([]);
+  it('refuses a session for an unknown player', async () => {
+    await expect(repository.create(sessionFixture(randomUUID()))).rejects.toThrow();
+    expect(await repository.listForPlayer(playerId)).toEqual([]);
   });
 
-  it("does not return another player's session", () => {
-    const session = repository.create(sessionFixture(playerId));
-    const otherPlayer = seedPlayer(database);
-    expect(repository.findForPlayer(session.id, otherPlayer)).toBeUndefined();
-    expect(repository.findForPlayer(randomUUID(), otherPlayer)).toBeUndefined();
+  it("does not return another player's session", async () => {
+    const session = await repository.create(sessionFixture(playerId));
+    const otherPlayer = await seedPlayer(database);
+    expect(await repository.findForPlayer(session.id, otherPlayer)).toBeUndefined();
+    expect(await repository.findForPlayer(randomUUID(), otherPlayer)).toBeUndefined();
   });
 
-  it("lists a player's sessions newest first", () => {
-    const older = repository.create(sessionFixture(playerId));
-    const newer = repository.create(sessionFixture(playerId, { createdAt: LATER, updatedAt: LATER }));
-    repository.create(sessionFixture(seedPlayer(database)));
-    expect(repository.listForPlayer(playerId).map((s) => s.id)).toEqual([newer.id, older.id]);
+  it("lists a player's sessions newest first", async () => {
+    const older = await repository.create(sessionFixture(playerId));
+    const newer = await repository.create(sessionFixture(playerId, { createdAt: LATER, updatedAt: LATER }));
+    await repository.create(sessionFixture(await seedPlayer(database)));
+    expect((await repository.listForPlayer(playerId)).map((s) => s.id)).toEqual([newer.id, older.id]);
   });
 
-  it('breaks createdAt ties by insertion order', () => {
-    const first = repository.create(sessionFixture(playerId));
-    const second = repository.create(sessionFixture(playerId));
-    expect(repository.listForPlayer(playerId).map((s) => s.id)).toEqual([second.id, first.id]);
+  it('breaks createdAt ties by insertion order', async () => {
+    const first = await repository.create(sessionFixture(playerId));
+    const second = await repository.create(sessionFixture(playerId));
+    expect((await repository.listForPlayer(playerId)).map((s) => s.id)).toEqual([second.id, first.id]);
   });
 
-  it('updates the turn, offer and state and refreshes updatedAt', () => {
-    const session = repository.create(sessionFixture(playerId));
+  it('updates the turn, offer and state and refreshes updatedAt', async () => {
+    const session = await repository.create(sessionFixture(playerId));
     const offer = {
       investment: 500_000,
       equity: 24,
@@ -66,13 +68,13 @@ describe('GameSessionRepository', () => {
       from: 'investor',
       turn: 2,
     } as const;
-    repository.update(session.id, {
+    await repository.update(session.id, {
       turn: 2,
       currentInvestorOffer: offer,
       investorState: { ...session.investorState, patience: 2 },
       status: 'negotiating',
     });
-    const found = repository.findForPlayer(session.id, playerId)!;
+    const found = (await repository.findForPlayer(session.id, playerId))!;
     expect(found.turn).toBe(2);
     expect(found.currentInvestorOffer).toEqual(offer);
     expect(found.investorState.patience).toBe(2);
@@ -80,7 +82,7 @@ describe('GameSessionRepository', () => {
     expect(found.updatedAt).toEqual(LATER);
   });
 
-  it('stores the player options and replaces them on update', () => {
+  it('stores the player options and replaces them on update', async () => {
     const options: PlayerOption[] = [
       {
         id: 'opt-1-1',
@@ -90,48 +92,52 @@ describe('GameSessionRepository', () => {
       },
       { id: 'opt-1-2', kind: 'decline', label: 'Walk away' },
     ];
-    const session = repository.create(sessionFixture(playerId, { playerOptions: options }));
-    expect(repository.findForPlayer(session.id, playerId)?.playerOptions).toEqual(options);
+    const session = await repository.create(sessionFixture(playerId, { playerOptions: options }));
+    expect((await repository.findForPlayer(session.id, playerId))?.playerOptions).toEqual(options);
 
     const next: PlayerOption[] = [{ id: 'opt-2-1', kind: 'accept', label: 'Accept €500k for 26%' }];
-    repository.update(session.id, { playerOptions: next });
-    expect(repository.findForPlayer(session.id, playerId)?.playerOptions).toEqual(next);
-    repository.update(session.id, { playerOptions: [] });
-    expect(repository.findForPlayer(session.id, playerId)?.playerOptions).toEqual([]);
+    await repository.update(session.id, { playerOptions: next });
+    expect((await repository.findForPlayer(session.id, playerId))?.playerOptions).toEqual(next);
+    await repository.update(session.id, { playerOptions: [] });
+    expect((await repository.findForPlayer(session.id, playerId))?.playerOptions).toEqual([]);
   });
 
-  it('rejects a counter option without an offer', () => {
+  it('rejects a counter option without an offer', async () => {
     const bad = [{ id: 'opt-1-1', kind: 'counter', label: 'Counter' }] as PlayerOption[];
-    expect(() => repository.create(sessionFixture(playerId, { playerOptions: bad }))).toThrow();
-    expect(repository.listForPlayer(playerId)).toEqual([]);
+    await expect(repository.create(sessionFixture(playerId, { playerOptions: bad }))).rejects.toThrow();
+    expect(await repository.listForPlayer(playerId)).toEqual([]);
   });
 
-  it('only updates a session still on the expected turn', () => {
-    const session = repository.create(sessionFixture(playerId, { turn: 2 }));
-    expect(repository.update(session.id, { turn: 3 }, { expectedTurn: 1 })).toBe(false);
-    expect(repository.findForPlayer(session.id, playerId)?.turn).toBe(2);
-    expect(repository.update(session.id, { turn: 3 }, { expectedTurn: 2 })).toBe(true);
-    expect(repository.findForPlayer(session.id, playerId)?.turn).toBe(3);
+  it('only updates a session still on the expected turn', async () => {
+    const session = await repository.create(sessionFixture(playerId, { turn: 2 }));
+    expect(await repository.update(session.id, { turn: 3 }, { expectedTurn: 1 })).toBe(false);
+    expect((await repository.findForPlayer(session.id, playerId))?.turn).toBe(2);
+    expect(await repository.update(session.id, { turn: 3 }, { expectedTurn: 2 })).toBe(true);
+    expect((await repository.findForPlayer(session.id, playerId))?.turn).toBe(3);
   });
 
-  it('rejects an invalid investor state on write', () => {
-    const session = repository.create(sessionFixture(playerId));
-    expect(() =>
+  it('rejects an invalid investor state on write', async () => {
+    const session = await repository.create(sessionFixture(playerId));
+    await expect(
       repository.update(session.id, { investorState: { ...session.investorState, patience: -1 } }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  it('fails loudly when a stored JSON column has drifted', () => {
-    const session = repository.create(sessionFixture(playerId));
-    database.sqlite
-      .prepare('update game_sessions set investor_state = \'{"budget":1}\' where id = ?')
-      .run(session.id);
-    expect(() => repository.findForPlayer(session.id, playerId)).toThrow(/investor_state/);
+  it('fails loudly when a stored JSON column has drifted', async () => {
+    const session = await repository.create(sessionFixture(playerId));
+    const { gameSessions } = database.tables;
+    await database.query((db) =>
+      db
+        .update(gameSessions)
+        .set({ investorState: { budget: 1 } })
+        .where(eq(gameSessions.id, session.id)),
+    );
+    await expect(repository.findForPlayer(session.id, playerId)).rejects.toThrow(/investor_state/);
   });
 
-  it('deletes a session', () => {
-    const session = repository.create(sessionFixture(playerId));
-    repository.delete(session.id);
-    expect(repository.findForPlayer(session.id, playerId)).toBeUndefined();
+  it('deletes a session', async () => {
+    const session = await repository.create(sessionFixture(playerId));
+    await repository.delete(session.id);
+    expect(await repository.findForPlayer(session.id, playerId)).toBeUndefined();
   });
 });

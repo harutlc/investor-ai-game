@@ -19,7 +19,7 @@ const HIDDEN_KEYS = [
 
 describe('GET /api/personas', () => {
   it('returns the six personas with public fields only', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await request(app).get('/api/personas');
 
     expect(res.status).toBe(200);
@@ -32,7 +32,7 @@ describe('GET /api/personas', () => {
   });
 
   it('leaks no hidden keys or budget values', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await request(app).get('/api/personas');
 
     for (const key of HIDDEN_KEYS) expect(res.text).not.toContain(`"${key}"`);
@@ -44,9 +44,9 @@ describe('GET /api/personas', () => {
   });
 
   it('creates a player session like any other /api endpoint', async () => {
-    const { app, players } = createTestApp();
+    const { app, players } = await createTestApp();
     const res = await request(app).get('/api/personas');
     expect(String(res.headers['set-cookie'])).toContain('inv.pid=');
-    expect(players.count()).toBe(1);
+    expect(await players.count()).toBe(1);
   });
 });

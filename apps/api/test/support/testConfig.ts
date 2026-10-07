@@ -36,7 +36,7 @@ export function testConfig(overrides: Overrides = {}): AppConfig {
       sessionMaxAgeDays: overrides.sessionMaxAgeDays ?? 30,
       csrf: { enabled: overrides.csrf ?? true },
     },
-    database: { file: ':memory:' },
+    database: { dialect: 'sqlite', file: ':memory:', poolMax: 10 },
     logging: { level: overrides.logLevel ?? 'silent', llmContent: overrides.llmContent ?? false },
     llm: {
       thinking: {

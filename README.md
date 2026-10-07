@@ -54,7 +54,7 @@ The `api` service must pass its `/api/health` check before `web` starts. Secrets
 | `LAYA_BASE_URL`   | `http://host.docker.internal:8000`  | `DOCKER_LAYA_BASE_URL`   |
 | web port          | `8080`                              | `WEB_PORT`               |
 
-`THINKING_PROVIDER` and `DECISION_PROVIDER` are passed through, so a value set in the shell wins over `.env`. `DOCKER_*` names are used because the `NODE_ENV` and URLs in a local `.env` describe the dev setup, not the containers. Compose also sets `PORT=3001`, `DATABASE_FILE=/app/data/game.sqlite` and `TRUST_PROXY=1`. Only nginx reaches the API, so the API trusts exactly one hop for the client IP, and rate limits stay per player.
+`THINKING_PROVIDER` and `DECISION_PROVIDER` are passed through, so a value set in the shell wins over `.env`. `DOCKER_*` names are used because the `NODE_ENV` and URLs in a local `.env` describe the dev setup, not the containers. Compose also sets `PORT=3001`, `DATABASE_DIALECT=sqlite`, `DATABASE_FILE=/app/data/game.sqlite` and `TRUST_PROXY=1` (see [Choosing a database](#choosing-a-database) for PostgreSQL and MySQL). Only nginx reaches the API, so the API trusts exactly one hop for the client IP, and rate limits stay per player.
 
 **LLM providers.**
 
@@ -237,18 +237,18 @@ On the instance, the paths are:
 
 ## Scripts (run from the repo root)
 
-| Script                      | What it does                                                            |
-| --------------------------- | ----------------------------------------------------------------------- |
-| `pnpm dev`                  | Starts the API with hot reload (`tsx watch`)                            |
-| `pnpm dev:web`              | Starts the web UI (Vite) on http://localhost:5173, proxying `/api`      |
-| `pnpm build`                | Compiles the API and `shared` with `tsc -b` into `dist/`                |
-| `pnpm build:web`            | Builds the web UI into `apps/web/dist/`                                 |
-| `pnpm start`                | Runs the built API (`node apps/api/dist/main.js`)                       |
-| `pnpm test`                 | Runs the Vitest suites in every package                                 |
-| `pnpm typecheck`            | Type-checks sources and tests                                           |
-| `pnpm lint` / `pnpm format` | ESLint (type-aware) / Prettier                                          |
-| `pnpm db:generate`          | Generates a migration from `apps/api/src/db/schema.ts`                  |
-| `pnpm db:migrate`           | Applies migrations with drizzle-kit (the API also does this on startup) |
+| Script                      | What it does                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `pnpm dev`                  | Starts the API with hot reload (`tsx watch`)                                  |
+| `pnpm dev:web`              | Starts the web UI (Vite) on http://localhost:5173, proxying `/api`            |
+| `pnpm build`                | Compiles the API and `shared` with `tsc -b` into `dist/`                      |
+| `pnpm build:web`            | Builds the web UI into `apps/web/dist/`                                       |
+| `pnpm start`                | Runs the built API (`node apps/api/dist/main.js`)                             |
+| `pnpm test`                 | Runs the Vitest suites in every package                                       |
+| `pnpm typecheck`            | Type-checks sources and tests                                                 |
+| `pnpm lint` / `pnpm format` | ESLint (type-aware) / Prettier                                                |
+| `pnpm db:generate`          | Generates migrations from `apps/api/src/db/schema/*.ts` (all three dialects)  |
+| `pnpm db:migrate`           | Applies migrations for `DATABASE_DIALECT` (the API also does this on startup) |
 
 ## Layout
 
@@ -295,28 +295,67 @@ Every error response has the shape `{ "error": { "code", "message", "details"?, 
 
 `config/app.config.json` holds non-secret settings. Environment variables (or `.env`) supply the secrets and can override some values:
 
-| Variable            | Overrides / purpose                                                    |
-| ------------------- | ---------------------------------------------------------------------- |
-| `COOKIE_SECRET`     | **Required.** At least 32 characters                                   |
-| `CSRF_ENABLED`      | `security.csrf.enabled` (`true` / `false`; `false` by default)         |
-| `CSRF_SECRET`       | Required only when CSRF is enabled; 32+ chars, not the cookie one      |
-| `NODE_ENV`          | `development` (default), `production` or `test`                        |
-| `PORT`              | `server.port`                                                          |
-| `TRUST_PROXY`       | `server.trustProxy` (`false`, a hop count or a comma list; not `true`) |
-| `CORS_ORIGINS`      | `cors.origins` (a comma-separated list of exact origins; no `*`)       |
-| `DATABASE_FILE`     | `database.file` (relative to the repo root, or `:memory:`)             |
-| `LOG_LEVEL`         | `logging.level` (unset: `debug` in development, `info` otherwise)      |
-| `LOG_LLM_CONTENT`   | `logging.llmContent` (`true` logs LLM prompts/responses; debug only)   |
-| `APP_CONFIG_PATH`   | Path to an alternative config file                                     |
-| `THINKING_PROVIDER` | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)              |
-| `DECISION_PROVIDER` | `llm.decision.provider` (`laya`, `jev` or `fake`)                      |
-| `OLLAMA_BASE_URL`   | `llm.thinking.providers.ollama.baseUrl`                                |
-| `LAYA_BASE_URL`     | `llm.decision.providers.laya.baseUrl`                                  |
-| `ANTHROPIC_API_KEY` | Required when the thinking provider is `anthropic`                     |
-| `TYPESAFE_API_KEY`  | Required when the decision provider is `jev`                           |
-| `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one       |
+| Variable            | Overrides / purpose                                                     |
+| ------------------- | ----------------------------------------------------------------------- |
+| `COOKIE_SECRET`     | **Required.** At least 32 characters                                    |
+| `CSRF_ENABLED`      | `security.csrf.enabled` (`true` / `false`; `false` by default)          |
+| `CSRF_SECRET`       | Required only when CSRF is enabled; 32+ chars, not the cookie one       |
+| `NODE_ENV`          | `development` (default), `production` or `test`                         |
+| `PORT`              | `server.port`                                                           |
+| `TRUST_PROXY`       | `server.trustProxy` (`false`, a hop count or a comma list; not `true`)  |
+| `CORS_ORIGINS`      | `cors.origins` (a comma-separated list of exact origins; no `*`)        |
+| `DATABASE_DIALECT`  | `database.dialect` (`sqlite` by default, `postgres` or `mysql`)         |
+| `DATABASE_FILE`     | `database.file` (SQLite only; relative to the repo root, or `:memory:`) |
+| `DATABASE_URL`      | Required for `postgres`/`mysql`: `postgres://…` or `mysql://…` (secret) |
+| `LOG_LEVEL`         | `logging.level` (unset: `debug` in development, `info` otherwise)       |
+| `LOG_LLM_CONTENT`   | `logging.llmContent` (`true` logs LLM prompts/responses; debug only)    |
+| `APP_CONFIG_PATH`   | Path to an alternative config file                                      |
+| `THINKING_PROVIDER` | `llm.thinking.provider` (`ollama`, `anthropic` or `fake`)               |
+| `DECISION_PROVIDER` | `llm.decision.provider` (`laya`, `jev` or `fake`)                       |
+| `OLLAMA_BASE_URL`   | `llm.thinking.providers.ollama.baseUrl`                                 |
+| `LAYA_BASE_URL`     | `llm.decision.providers.laya.baseUrl`                                   |
+| `ANTHROPIC_API_KEY` | Required when the thinking provider is `anthropic`                      |
+| `TYPESAFE_API_KEY`  | Required when the decision provider is `jev`                            |
+| `LAYA_API_KEY`      | Optional; sent as a bearer token if your laya-serve requires one        |
 
 Invalid configuration stops startup with a list of every problem, written as a `fatal` log line. Secret values are never printed.
+
+## Choosing a database
+
+The API stores its data in SQLite by default: one file, no server to run. It can use PostgreSQL (14 or later) or MySQL (8.0 or later) instead. MariaDB is not supported.
+
+| `DATABASE_DIALECT` | Where the data lives                 | Also needs                                       |
+| ------------------ | ------------------------------------ | ------------------------------------------------ |
+| `sqlite` (default) | `database.file` / `DATABASE_FILE`    | nothing                                          |
+| `postgres`         | the database named in `DATABASE_URL` | `DATABASE_URL=postgres://user:pass@host:5432/db` |
+| `mysql`            | the database named in `DATABASE_URL` | `DATABASE_URL=mysql://user:pass@host:3306/db`    |
+
+- **Startup.** The API connects and applies its migrations before it listens. If the server cannot be reached or migrated, it exits with a `fatal` log line naming the dialect and host, never the password. An empty database gets the whole schema on first start.
+- **Same behavior everywhere.** Games, transcripts, offers and decision logs read back the same on all three, including the order of rows written in the same millisecond. The test suite checks this (see below).
+- **Switching starts empty.** Nothing copies an existing SQLite file into PostgreSQL or MySQL. Switching back to SQLite finds the file as it was.
+- **One API process per database.** The turn lock and the rate limiter live in memory, so running several API replicas against one server database is not supported.
+- **Pool size.** `database.poolMax` (default 10) caps the connections to a PostgreSQL or MySQL server.
+
+**With Docker.** Two override files add a database container on its own named volume, reachable only on the Compose network, and point the API at it:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.mysql.yml up --build
+```
+
+`DOCKER_DB_PASSWORD` in `.env` sets the database password (URL-safe characters only; the default is for local use). Without an override file the stack stays on SQLite, even if `.env` sets `DATABASE_DIALECT` for local development.
+
+**Schema changes.** Each dialect has its own schema file (`apps/api/src/db/schema/{sqlite,postgres,mysql}.ts`) and migrations folder (`apps/api/src/db/migrations/<dialect>/`). Change all three schema files, then run `pnpm db:generate`. A test fails if the three schemas disagree on tables, columns or TypeScript types.
+
+**Running the tests against PostgreSQL and MySQL.** The suite always runs on SQLite. With these variables set it also runs every persistence test on PostgreSQL 14 and MySQL 8.0, each test in a fresh database that is dropped afterwards:
+
+```sh
+docker compose -f docker-compose.test-db.yml up -d --wait
+TEST_POSTGRES_URL=postgres://postgres:test@127.0.0.1:5432/postgres \
+TEST_MYSQL_URL=mysql://root:test@127.0.0.1:3306/mysql \
+pnpm --filter @investor/api test
+docker compose -f docker-compose.test-db.yml down
+```
 
 ## Logging
 
@@ -324,7 +363,7 @@ The API logs structured JSON to stdout (pretty-printed in development) through o
 
 - **Level:** `LOG_LEVEL`, else `debug` in development and `info` otherwise.
 - **Request id:** every line written while a request is handled carries `requestId` (the `X-Request-Id` value), including lines from providers, the brain and repositories, via `AsyncLocalStorage`.
-- **Redaction:** `Cookie`, `Set-Cookie`, `Authorization`, `X-CSRF-Token` and `X-Api-Key` headers, and fields named `password`, `token`, `accessToken`, `refreshToken`, `secret`, `apiKey`, `api_key` or `authorization` (top level or one level down) are logged as `[Redacted]`. Don't log config or secrets objects.
+- **Redaction:** `Cookie`, `Set-Cookie`, `Authorization`, `X-CSRF-Token` and `X-Api-Key` headers, and fields named `password`, `token`, `accessToken`, `refreshToken`, `secret`, `apiKey`, `api_key`, `authorization` or `databaseUrl` (top level or one level down) are logged as `[Redacted]`. Don't log config or secrets objects.
 - **Sentry:** with `SENTRY_DSN` set, `info`/`warn`/`error` lines also go to Sentry Logs (health-probe request lines excepted), and `error`/`fatal` lines become Sentry error events, tagged `request_id`. Errors reach Sentry only through the logger, so a failure is reported once. SDK v11 has Sentry Logs on by default (there is no `enableLogs` option); see `apps/api/src/monitoring/SentryOptions.ts`.
 
 **LLM calls.** Every call to Anthropic, Ollama, Jev and Laya is logged by `LlmCallLogger`, so call sites log nothing themselves (the fake providers log nothing). Each line has `provider`, `operation` (`generate` for thinking, `decide` for decisions, `ping` for health probes), `model` and, inside a request, `requestId`. The backend's request id is `anthropicRequestId` for Anthropic and `providerRequestId` for the others (Jev/Laya's `x-typesafe-request-id`; Ollama sends none).

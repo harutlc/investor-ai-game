@@ -57,7 +57,7 @@ const boom = {
         throw new ProviderUnavailableError(undefined, { cause });
       }),
 };
-const { app } = createTestApp({ logger, extraControllers: [boom], csrf: false });
+const { app } = await createTestApp({ logger, extraControllers: [boom], csrf: false });
 
 beforeAll(() => {
   Sentry.init({

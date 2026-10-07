@@ -123,25 +123,32 @@ export class GameEngine {
       updatedAt: now,
     };
     const investorLine = this.message(sessionId, 'investor', line.text);
-    database.transaction(() => {
-      sessions.create(session);
-      messages.add(system);
-      messages.add(investorLine);
-      offers.add({ ...GameEngine.offer(terms, 'investor', 0), id: randomUUID(), sessionId, createdAt: now });
+    await database.transaction(async () => {
+      await sessions.create(session);
+      await messages.add(system);
+      await messages.add(investorLine);
+      await offers.add({
+        ...GameEngine.offer(terms, 'investor', 0),
+        id: randomUUID(),
+        sessionId,
+        createdAt: now,
+      });
     });
     return service.view(session);
   }
 
   async playTurn(playerId: string, gameId: string, request: PlayTurnRequest): Promise<TurnResultDto> {
     const { service, lock } = this.deps;
-    // Load and lock with no await in between, so two requests cannot both pass the checks.
-    const session = service.load(playerId, gameId);
-    if (session.status !== 'negotiating') throw new GameAlreadyFinishedError();
-    lock.acquire(session.id);
+    // Lock before the first await, so two requests cannot both load the session and pass the checks. The
+    // key includes the player, so a request for someone else's game id never blocks its owner.
+    const key = `${playerId}/${gameId}`;
+    lock.acquire(key);
     try {
+      const session = await service.load(playerId, gameId);
+      if (session.status !== 'negotiating') throw new GameAlreadyFinishedError();
       return await this.runTurn(session, request);
     } finally {
-      lock.release(session.id);
+      lock.release(key);
     }
   }
 
@@ -149,7 +156,7 @@ export class GameEngine {
     const { service, offers, resolver } = this.deps;
     const turn = session.turn + 1;
     const persona = service.persona(session.personaId);
-    const earlierOffers: Offer[] = offers.listForSession(session.id).map((stored) => ({
+    const earlierOffers: Offer[] = (await offers.listForSession(session.id)).map((stored) => ({
       investment: stored.investment,
       equity: stored.equity,
       impliedValuation: stored.impliedValuation,
@@ -160,11 +167,11 @@ export class GameEngine {
     const playerMessage = this.message(session.id, 'player', move.chatText);
     const outcome = await this.decide(session, persona, earlierOffers, move, turn);
     const reply = this.message(session.id, outcome.reply.role, outcome.reply.text);
-    this.save(session, turn, playerMessage, reply, outcome);
+    await this.save(session, turn, playerMessage, reply, outcome);
 
-    const saved = service.load(session.playerId, session.id);
+    const saved = await service.load(session.playerId, session.id);
     return TurnResultDtoSchema.parse({
-      session: service.view(saved),
+      session: await service.view(saved),
       newMessages: [playerMessage, reply].map((message) => this.deps.mapper.toMessage(message)),
     });
   }
@@ -179,7 +186,7 @@ export class GameEngine {
   ): Promise<TurnOutcome> {
     const { states, brain, policy, limiter } = this.deps;
     const currentOffer = MoveResolver.currentOffer(session);
-    const context = this.voiceContext(session, persona, move, currentOffer);
+    const context = await this.voiceContext(session, persona, move, currentOffer);
     const kept = { investorState: session.investorState, currentOffer: session.currentInvestorOffer! };
 
     if (move.playerMove === 'decline') {
@@ -247,26 +254,26 @@ export class GameEngine {
   }
 
   /** One transaction for everything the turn produced; a concurrent writer makes it roll back. */
-  private save(
+  private async save(
     session: GameSession,
     turn: number,
     playerMessage: StoredMessage,
     reply: StoredMessage,
     outcome: TurnOutcome,
-  ): void {
+  ): Promise<void> {
     const { database, messages, offers, sessions } = this.deps;
-    database.transaction(() => {
-      messages.add(playerMessage);
-      messages.add(reply);
+    await database.transaction(async () => {
+      await messages.add(playerMessage);
+      await messages.add(reply);
       for (const { side, terms } of outcome.newOffers) {
-        offers.add({
+        await offers.add({
           ...GameEngine.offer(terms, side, turn),
           id: randomUUID(),
           sessionId: session.id,
           createdAt: this.clock(),
         });
       }
-      const changed = sessions.update(
+      const changed = await sessions.update(
         session.id,
         {
           turn,
@@ -282,15 +289,16 @@ export class GameEngine {
     });
   }
 
-  private voiceContext(
+  private async voiceContext(
     session: GameSession,
     persona: InvestorPersona,
     move: ResolvedMove,
     currentOffer: OfferInput,
-  ): VoiceContext {
-    const history = this.deps.messages
-      .listForSession(session.id)
-      .map((message) => ({ role: message.role, text: message.text }));
+  ): Promise<VoiceContext> {
+    const history = (await this.deps.messages.listForSession(session.id)).map((message) => ({
+      role: message.role,
+      text: message.text,
+    }));
     history.push({ role: 'player', text: move.chatText });
     return {
       persona,

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Database } from '../../../src/db/Database.js';
+import type { Database } from '../../../src/db/Database.js';
 import { DecisionLogger } from '../../../src/llm/decision/DecisionLogger.js';
 import { FakeDecisionProvider } from '../../../src/llm/decision/FakeDecisionProvider.js';
 import { ProviderUnavailableError } from '../../../src/llm/errors/ProviderUnavailableError.js';
 import { DecisionLogRepository } from '../../../src/repositories/DecisionLogRepository.js';
 import { T0, seedSession } from '../../support/gameFixtures.js';
 import { captureLogger } from '../../support/silentLogger.js';
+import { dialectsUnderTest, openTestDatabase } from '../../support/testDatabase.js';
 
 const questions = {
   good_deal: { type: 'noul', instructions: "The player's offer is attractive enough." },
@@ -22,20 +23,20 @@ let logs: DecisionLogRepository;
 let provider: FakeDecisionProvider;
 let sessionId: string;
 
-beforeEach(() => {
-  database = new Database(':memory:');
-  logs = new DecisionLogRepository(database.db);
-  provider = new FakeDecisionProvider();
-  sessionId = seedSession(database).id;
-});
-afterEach(() => database.close());
-
 function create(repository: DecisionLogRepository = logs) {
   const { logger, lines } = captureLogger();
   return { decisions: new DecisionLogger(provider, repository, logger, () => T0), lines };
 }
 
-describe('DecisionLogger', () => {
+describe.each(dialectsUnderTest())('DecisionLogger (%s)', (dialect) => {
+  beforeEach(async () => {
+    database = await openTestDatabase(dialect);
+    logs = new DecisionLogRepository(database);
+    provider = new FakeDecisionProvider();
+    sessionId = (await seedSession(database)).id;
+  });
+  afterEach(() => database.close());
+
   it('returns the answers and logs one entry', async () => {
     provider.enqueue({ good_deal: { type: 'noul', probability: 0.31 } });
     const { decisions } = create();
@@ -44,7 +45,7 @@ describe('DecisionLogger', () => {
 
     expect(result.answers.good_deal).toEqual({ type: 'noul', probability: 0.31 });
     expect(result.answers.reaction.value).toBe('accept');
-    expect(logs.listForSession(sessionId)).toEqual([
+    expect(await logs.listForSession(sessionId)).toEqual([
       {
         id: expect.any(String),
         sessionId,
@@ -70,7 +71,7 @@ describe('DecisionLogger', () => {
       failure,
     );
 
-    const [entry] = logs.listForSession(sessionId);
+    const [entry] = await logs.listForSession(sessionId);
     expect(entry).toMatchObject({
       turn: 1,
       stage: 'A',
@@ -88,14 +89,12 @@ describe('DecisionLogger', () => {
     await expect(decisions.decide({ sessionId, turn: 1, stage: 'B' }, { state, questions })).rejects.toThrow(
       'boom',
     );
-    expect(logs.listForSession(sessionId)[0]?.errorCode).toBe('INTERNAL_ERROR');
+    expect((await logs.listForSession(sessionId))[0]?.errorCode).toBe('INTERNAL_ERROR');
   });
 
   it('returns the answers even when the log write fails, and logs the failure', async () => {
-    const broken = new DecisionLogRepository(database.db);
-    broken.add = () => {
-      throw new Error('disk full');
-    };
+    const broken = new DecisionLogRepository(database);
+    broken.add = () => Promise.reject(new Error('disk full'));
     const { decisions, lines } = create(broken);
 
     const result = await decisions.decide({ sessionId, turn: 2, stage: 'B' }, { state, questions });
@@ -118,7 +117,7 @@ describe('DecisionLogger', () => {
     await expect(
       decisions.decide({ sessionId, turn: 1, stage: 'B' }, { state, questions }),
     ).rejects.toThrow();
-    const rows = database.sqlite.prepare('select * from decision_logs').all();
+    const rows = await database.query((db) => db.select().from(database.tables.decisionLogs));
     expect(JSON.stringify(rows)).not.toContain('sk-secret');
   });
 });

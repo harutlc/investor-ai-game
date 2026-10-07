@@ -112,18 +112,37 @@ export class Container {
   readonly healthService: HealthService;
   readonly server: ApiServer;
 
-  constructor(
+  /**
+   * Opens the configured database (connecting and migrating it) and builds everything on top of it. Rejects
+   * with a DatabaseConnectionError when the database cannot be opened.
+   */
+  static async create(config: AppConfig, overrides: ContainerOverrides = {}): Promise<Container> {
+    const logger = overrides.logger ?? LoggerFactory.create(config);
+    const database =
+      overrides.database ??
+      (await Database.open({
+        dialect: config.database.dialect,
+        file: config.database.file,
+        url: config.secrets.databaseUrl,
+        poolMax: config.database.poolMax,
+        onIdleError: (error) => logger.warn({ err: error }, 'idle database connection failed'),
+      }));
+    return new Container(config, database, { ...overrides, logger });
+  }
+
+  private constructor(
     readonly config: AppConfig,
-    overrides: ContainerOverrides = {},
+    database: Database,
+    overrides: ContainerOverrides,
   ) {
     this.logger = overrides.logger ?? LoggerFactory.create(config);
-    this.database = overrides.database ?? new Database(config.database.file);
+    this.database = database;
 
-    this.playerRepository = new PlayerRepository(this.database.db);
-    this.gameSessionRepository = new GameSessionRepository(this.database.db, overrides.clock);
-    this.messageRepository = new MessageRepository(this.database.db);
-    this.offerRepository = new OfferRepository(this.database.db);
-    this.decisionLogRepository = new DecisionLogRepository(this.database.db);
+    this.playerRepository = new PlayerRepository(this.database);
+    this.gameSessionRepository = new GameSessionRepository(this.database, overrides.clock);
+    this.messageRepository = new MessageRepository(this.database);
+    this.offerRepository = new OfferRepository(this.database);
+    this.decisionLogRepository = new DecisionLogRepository(this.database);
 
     this.llmCalls = new LlmCallLogger({
       logger: this.logger,
@@ -249,7 +268,8 @@ export class Container {
     });
   }
 
-  dispose(): void {
-    this.database.close();
+  /** Closes the database connection(s). */
+  dispose(): Promise<void> {
+    return this.database.close();
   }
 }

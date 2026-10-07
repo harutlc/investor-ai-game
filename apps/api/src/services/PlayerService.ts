@@ -22,17 +22,18 @@ export class PlayerService {
   ) {}
 
   /** @param verifiedId the player id from a cookie whose signature has already been verified, if any */
-  resolveOrCreate(verifiedId: string | undefined): ResolvedPlayer {
+  async resolveOrCreate(verifiedId: string | undefined): Promise<ResolvedPlayer> {
     const now = this.clock();
-    const existing = verifiedId && UUID.test(verifiedId) ? this.players.findById(verifiedId) : undefined;
+    const existing =
+      verifiedId && UUID.test(verifiedId) ? await this.players.findById(verifiedId) : undefined;
 
     if (!existing) {
-      const player = this.players.create({ id: randomUUID(), createdAt: now, lastSeenAt: now });
+      const player = await this.players.create({ id: randomUUID(), createdAt: now, lastSeenAt: now });
       return { player, issueCookie: true };
     }
 
     if (now.getTime() - existing.lastSeenAt.getTime() > PlayerService.TOUCH_INTERVAL_MS) {
-      this.players.touch(existing.id, now);
+      await this.players.touch(existing.id, now);
       return { player: { ...existing, lastSeenAt: now }, issueCookie: true };
     }
     return { player: existing, issueCookie: false };

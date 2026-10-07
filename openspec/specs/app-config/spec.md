@@ -7,7 +7,7 @@ Gives the API one validated, typed source of configuration. It combines a commit
 ## Requirements
 
 ### Requirement: Configuration sources
-The system SHALL load non-secret settings from a committed JSON config file (`config/app.config.json`) and secrets from environment variables, which can optionally come from a git-ignored `.env` file. Secrets (cookie and CSRF signing secrets, API keys) MUST NOT be read from the committed config file.
+The system SHALL load non-secret settings from a committed JSON config file (`config/app.config.json`) and secrets from environment variables, which can optionally come from a git-ignored `.env` file. Secrets (cookie and CSRF signing secrets, API keys and the database connection string `DATABASE_URL`) MUST NOT be read from the committed config file.
 
 #### Scenario: Settings come from the config file
 - **WHEN** the API starts with a valid config file that sets the server port to 3001
@@ -17,8 +17,12 @@ The system SHALL load non-secret settings from a committed JSON config file (`co
 - **WHEN** `COOKIE_SECRET` and `CSRF_SECRET` are set in the environment
 - **THEN** the API uses them to sign cookies and CSRF tokens
 
+#### Scenario: Database URL only from the environment
+- **WHEN** the committed config file contains a `database.url` key
+- **THEN** startup aborts with a message naming `database.url` as an unknown key, and the connection string is read only from `DATABASE_URL`
+
 ### Requirement: Environment overrides
-The system SHALL let selected environment variables override values from the config file: at least `PORT`, `CORS_ORIGINS` (comma-separated), `DATABASE_FILE`, `LOG_LEVEL`, `LOG_LLM_CONTENT`, `NODE_ENV` and `TRUST_PROXY`. An environment value MUST win over the file value.
+The system SHALL let selected environment variables override values from the config file: at least `PORT`, `CORS_ORIGINS` (comma-separated), `DATABASE_DIALECT`, `DATABASE_FILE`, `LOG_LEVEL`, `LOG_LLM_CONTENT`, `NODE_ENV` and `TRUST_PROXY`. An environment value MUST win over the file value.
 
 `LOG_LEVEL` is optional both in the environment and in the config file. When it is set in neither, the log level is the default for the environment (see api-foundation, "Structured logging with redaction").
 
@@ -30,6 +34,8 @@ The system SHALL let selected environment variables override values from the con
 - a comma-separated list of proxy addresses or CIDRs.
 
 `true` MUST be rejected at startup, as it is in the config file. Trusting every hop would let any client spoof its IP and get around per-IP rate limits.
+
+`DATABASE_DIALECT` overrides `database.dialect`. It accepts `sqlite`, `postgres` or `mysql`, and any other value MUST be rejected at startup.
 
 #### Scenario: Port override
 - **WHEN** the config file sets the port to 3001 and the environment sets `PORT=4000`
@@ -63,6 +69,14 @@ The system SHALL let selected environment variables override values from the con
 - **WHEN** the environment sets `LOG_LLM_CONTENT=yes`
 - **THEN** startup aborts with a non-zero exit code and a message that names `logging.llmContent (from LOG_LLM_CONTENT)`
 
+#### Scenario: Dialect override
+- **WHEN** the config file leaves `database.dialect` unset and the environment sets `DATABASE_DIALECT=postgres`
+- **THEN** the API uses PostgreSQL
+
+#### Scenario: Invalid dialect
+- **WHEN** the environment sets `DATABASE_DIALECT=oracle`
+- **THEN** startup aborts with a non-zero exit code and a message that names `database.dialect (from DATABASE_DIALECT)`
+
 ### Requirement: Validation and fail-fast startup
 The system SHALL validate the merged configuration against a schema before it opens any port or database connection. When validation fails, the process MUST exit with a non-zero code and print a message that names every invalid or missing key. Keys that are required only conditionally (for example `CSRF_SECRET` while CSRF protection is enabled, or the active provider's API key) MAY be reported in a second pass, once the other problems are fixed. The message MUST NOT print secret values.
 
@@ -84,3 +98,18 @@ The system SHALL expose the validated configuration to the rest of the applicati
 #### Scenario: Mutation attempt
 - **WHEN** application code tries to assign a new value to a configuration property
 - **THEN** the value stays unchanged (the assignment throws in strict mode)
+
+### Requirement: Database connection settings
+The system SHALL require `DATABASE_URL` when the dialect is `postgres` or `mysql`, and its scheme MUST match the dialect (`postgres://` or `postgresql://` for `postgres`, `mysql://` for `mysql`). For `sqlite` it MUST ignore `DATABASE_URL` and use `database.file`. Validation messages MUST NOT print the URL or its password.
+
+#### Scenario: Missing URL for a server dialect
+- **WHEN** the API starts with `DATABASE_DIALECT=mysql` and no `DATABASE_URL`
+- **THEN** startup aborts with a non-zero exit code and a message naming `DATABASE_URL` as missing
+
+#### Scenario: Scheme does not match the dialect
+- **WHEN** the API starts with `DATABASE_DIALECT=postgres` and `DATABASE_URL=mysql://game:s3cret@db/game`
+- **THEN** startup aborts with a message saying `DATABASE_URL` must be a PostgreSQL URL, and the message does not contain `s3cret`
+
+#### Scenario: URL ignored for SQLite
+- **WHEN** the dialect is `sqlite` and `DATABASE_URL` is set
+- **THEN** the API starts and stores its data in the `database.file` SQLite file

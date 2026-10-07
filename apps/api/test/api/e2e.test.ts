@@ -23,7 +23,7 @@ class EchoController implements Controller {
 
 describe('browser flow: session → CSRF token → mutation', () => {
   it('works end to end with cookies and the token, and fails without the token', async () => {
-    const { app } = createTestApp({ extraControllers: [new EchoController()] });
+    const { app } = await createTestApp({ extraControllers: [new EchoController()] });
     const browser = request.agent(app);
 
     const session = SessionDtoSchema.parse(
