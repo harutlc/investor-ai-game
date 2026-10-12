@@ -17,8 +17,10 @@ data/
 .DS_Store
 .idea/workspace.xml
 
-# Terraform (infra/aws)
+# Terraform (infra/aws, infra/hetzner)
 infra/aws/.terraform/
 infra/aws/terraform.tfvars
+infra/hetzner/.terraform/
+infra/hetzner/terraform.tfvars
 *.tfstate
 *.tfstate.*
