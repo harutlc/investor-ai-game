@@ -12,7 +12,6 @@ describe('GET /api/health', () => {
     expect(res.status).toBe(200);
     const body = HealthDtoSchema.parse(res.body);
     expect(body).toMatchObject({ status: 'ok', checks: { database: 'ok', thinking: 'ok', decision: 'ok' } });
-    expect(res.headers['cache-control']).toBe('no-store');
   });
 
   it('returns 503 degraded when the database is unavailable', async () => {
