@@ -13,6 +13,9 @@ services:
     environment:
       NODE_ENV: ${DOCKER_NODE_ENV:-production}
       PORT: '3001'
+      # SQLite on the game-data volume. Pinned so a DATABASE_DIALECT in .env (local dev) cannot change it;
+      # docker-compose.postgres.yml / docker-compose.mysql.yml override it.
+      DATABASE_DIALECT: sqlite
       DATABASE_FILE: /app/data/game.sqlite
       # Only nginx reaches this container, so exactly one hop is trusted for the client IP.
       TRUST_PROXY: '1'

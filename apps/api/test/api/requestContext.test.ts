@@ -41,7 +41,7 @@ class LoggingProvider implements ThinkingProvider {
   }
 }
 
-function setup() {
+async function setup() {
   const lines: Record<string, unknown>[] = [];
   const sink = new Writable({
     write(chunk: Buffer, _encoding, done) {
@@ -53,7 +53,7 @@ function setup() {
   const provider = new LoggingProvider();
   provider.logger = logger;
   const decisions = new FakeDecisionProvider();
-  const { app } = createTestApp({ logger, thinkingProvider: provider, decisionProvider: decisions });
+  const { app } = await createTestApp({ logger, thinkingProvider: provider, decisionProvider: decisions });
   return { app, lines, decisions };
 }
 
@@ -67,7 +67,7 @@ const PITCH = {
 
 describe('request id on every log line', () => {
   it('tags provider lines written during a game turn with that request id', async () => {
-    const { app, lines, decisions } = setup();
+    const { app, lines, decisions } = await setup();
     const agent = request.agent(app);
     const { csrfToken } = (await agent.get('/api/csrf-token')).body as { csrfToken: string };
     const game = (
@@ -102,7 +102,7 @@ describe('request id on every log line', () => {
   });
 
   it('keeps concurrent requests apart', async () => {
-    const { app, lines } = setup();
+    const { app, lines } = await setup();
     const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
     await Promise.all(ids.map((id) => request(app).get('/api/personas').set('X-Request-Id', id)));
     const completed = lines.filter((line) => line.msg === 'request completed');

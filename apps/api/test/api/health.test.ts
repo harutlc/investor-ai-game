@@ -7,7 +7,7 @@ import { createTestApp } from '../support/createTestApp.js';
 
 describe('GET /api/health', () => {
   it('returns 200 ok when the database answers', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await request(app).get('/api/health');
     expect(res.status).toBe(200);
     const body = HealthDtoSchema.parse(res.body);
@@ -16,8 +16,8 @@ describe('GET /api/health', () => {
   });
 
   it('returns 503 degraded when the database is unavailable', async () => {
-    const { app, container } = createTestApp();
-    container.database.close();
+    const { app, container } = await createTestApp();
+    await container.database.close();
     const res = await request(app).get('/api/health');
     expect(res.status).toBe(503);
     expect(HealthDtoSchema.parse(res.body)).toMatchObject({
@@ -28,7 +28,7 @@ describe('GET /api/health', () => {
 
   it('stays 200 when a provider is down, reporting it in checks', async () => {
     const thinkingProvider = new FakeThinkingProvider().setHealthy(false);
-    const { app } = createTestApp({ thinkingProvider });
+    const { app } = await createTestApp({ thinkingProvider });
     const res = await request(app).get('/api/health');
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -40,14 +40,14 @@ describe('GET /api/health', () => {
   it('pings providers once per cache period', async () => {
     const decisionProvider = new FakeDecisionProvider();
     const ping = vi.spyOn(decisionProvider, 'ping');
-    const { app } = createTestApp({ decisionProvider });
+    const { app } = await createTestApp({ decisionProvider });
     await request(app).get('/api/health');
     await request(app).get('/api/health');
     expect(ping).toHaveBeenCalledTimes(1);
   });
 
   it('never names providers, models or URLs', async () => {
-    const { app } = createTestApp({
+    const { app } = await createTestApp({
       mutate: (config) => {
         config.llm.thinking.provider = 'ollama';
         config.llm.decision.provider = 'laya';
@@ -58,14 +58,14 @@ describe('GET /api/health', () => {
   });
 
   it('sets no cookies and creates no player', async () => {
-    const { app, players } = createTestApp();
+    const { app, players } = await createTestApp();
     const res = await request(app).get('/api/health');
     expect(res.headers['set-cookie']).toBeUndefined();
-    expect(players.count()).toBe(0);
+    expect(await players.count()).toBe(0);
   });
 
   it('reveals nothing beyond status, uptime and checks', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await request(app).get('/api/health');
     expect(Object.keys(res.body as object).sort()).toEqual(['checks', 'status', 'uptime']);
   });

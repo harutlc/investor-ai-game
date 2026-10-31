@@ -17,22 +17,22 @@ import { createTestApp } from '../support/createTestApp.js';
 import { seedSession, sessionFixture } from '../support/gameFixtures.js';
 
 describe('Container LLM wiring', () => {
-  it('uses fake providers by default in tests', () => {
-    const { container } = createTestApp();
+  it('uses fake providers by default in tests', async () => {
+    const { container } = await createTestApp();
     expect(container.thinkingProvider).toBeInstanceOf(FakeThinkingProvider);
     expect(container.decisionProvider).toBeInstanceOf(FakeDecisionProvider);
   });
 
-  it('accepts injected providers', () => {
+  it('accepts injected providers', async () => {
     const thinkingProvider = new FakeThinkingProvider(['scripted']);
     const decisionProvider = new FakeDecisionProvider();
-    const { container } = createTestApp({ thinkingProvider, decisionProvider });
+    const { container } = await createTestApp({ thinkingProvider, decisionProvider });
     expect(container.thinkingProvider).toBe(thinkingProvider);
     expect(container.decisionProvider).toBe(decisionProvider);
   });
 
-  it('builds the configured real providers through the factories', () => {
-    const { container } = createTestApp({
+  it('builds the configured real providers through the factories', async () => {
+    const { container } = await createTestApp({
       mutate: (config) => {
         config.llm.thinking.provider = 'ollama';
         config.llm.decision.provider = 'laya';
@@ -45,19 +45,19 @@ describe('Container LLM wiring', () => {
 });
 
 describe('Container game wiring', () => {
-  it('builds the game repositories, confidence gate and decision logger', () => {
-    const { container } = createTestApp();
+  it('builds the game repositories, confidence gate and decision logger', async () => {
+    const { container } = await createTestApp();
     expect(container.confidenceGate).toBeInstanceOf(ConfidenceGate);
     expect(container.confidenceGate.minConfidence).toBe(0.55);
     expect(container.decisionLogger).toBeInstanceOf(DecisionLogger);
-    expect(container.gameSessionRepository.listForPlayer('nobody')).toEqual([]);
-    expect(container.messageRepository.listForSession('none')).toEqual([]);
-    expect(container.offerRepository.listForSession('none')).toEqual([]);
-    expect(container.decisionLogRepository.listForSession('none')).toEqual([]);
+    expect(await container.gameSessionRepository.listForPlayer('nobody')).toEqual([]);
+    expect(await container.messageRepository.listForSession('none')).toEqual([]);
+    expect(await container.offerRepository.listForSession('none')).toEqual([]);
+    expect(await container.decisionLogRepository.listForSession('none')).toEqual([]);
   });
 
-  it('reads the threshold from llm.decision.minConfidence', () => {
-    const { container } = createTestApp({
+  it('reads the threshold from llm.decision.minConfidence', async () => {
+    const { container } = await createTestApp({
       mutate: (config) => {
         config.llm.decision.minConfidence = 0.7;
       },
@@ -65,15 +65,15 @@ describe('Container game wiring', () => {
     expect(container.confidenceGate.minConfidence).toBe(0.7);
   });
 
-  it('builds the investor brain with the MVP question sets, two per stage', () => {
-    const { container } = createTestApp();
+  it('builds the investor brain with the MVP question sets, two per stage', async () => {
+    const { container } = await createTestApp();
     expect(container.investorBrain).toBeInstanceOf(InvestorBrain);
     expect(container.questionSetRegistry.forStage('A').map((set) => set.id)).toEqual(['intent', 'offer']);
     expect(container.questionSetRegistry.forStage('B').map((set) => set.id)).toEqual(['deal', 'conduct']);
   });
 
-  it('gives the state builder the configured turn limit', () => {
-    const { container } = createTestApp({
+  it('gives the state builder the configured turn limit', async () => {
+    const { container } = await createTestApp({
       mutate: (config) => {
         config.game.maxTurns = 8;
       },
@@ -88,19 +88,18 @@ describe('Container game wiring', () => {
   });
 
   it('logs brain decisions through the container database', async () => {
-    const { container } = createTestApp();
-    const sessionId = seedSession(container.database).id;
+    const { container } = await createTestApp();
+    const sessionId = (await seedSession(container.database)).id;
 
     await container.investorBrain.evaluate({ sessionId, turn: 1, ...brainMove('Deal?') });
 
-    expect(container.decisionLogRepository.listForSession(sessionId).map((entry) => entry.stage)).toEqual([
-      'B',
-      'B',
-    ]);
+    expect(
+      (await container.decisionLogRepository.listForSession(sessionId)).map((entry) => entry.stage),
+    ).toEqual(['B', 'B']);
   });
 
-  it('builds the negotiation policy, meter hints and turn limiter from config.game', () => {
-    const { container } = createTestApp({
+  it('builds the negotiation policy, meter hints and turn limiter from config.game', async () => {
+    const { container } = await createTestApp({
       mutate: (config) => {
         config.game.maxTurns = 8;
       },
@@ -128,7 +127,7 @@ describe('Container game wiring', () => {
       "GreenCharge. €500k for 30%, and that's generous.",
       JSON.stringify({ options: [{ kind: 'message', label: 'Ask about the terms' }] }),
     ]);
-    const { container } = createTestApp({ thinkingProvider });
+    const { container } = await createTestApp({ thinkingProvider });
     expect(container.investorVoice).toBeInstanceOf(InvestorVoice);
 
     const offer = container.openingOfferCalculator.offer(
@@ -145,14 +144,14 @@ describe('Container game wiring', () => {
     ]);
   });
 
-  it('builds the game engine and its read side', () => {
-    const { container } = createTestApp();
+  it('builds the game engine and its read side', async () => {
+    const { container } = await createTestApp();
     expect(container.gameEngine).toBeInstanceOf(GameEngine);
     expect(container.gameSessionService).toBeInstanceOf(GameSessionService);
   });
 
   it('mounts /api/games', async () => {
-    const { app } = createTestApp();
+    const { app } = await createTestApp();
     const res = await request(app).get('/api/games');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ games: [] });

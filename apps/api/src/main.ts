@@ -5,6 +5,7 @@ import { ConfigError } from './config/ConfigError.js';
 import { ConfigLoader } from './config/ConfigLoader.js';
 import { WorkspaceRoot } from './config/WorkspaceRoot.js';
 import { Container } from './container/Container.js';
+import { DatabaseConnectionError } from './db/DatabaseConnectionError.js';
 import { LoggerFactory } from './logging/LoggerFactory.js';
 
 /** The bootstrap logger until the container's logger exists. */
@@ -33,7 +34,18 @@ async function main(): Promise<void> {
     exitAfterFlush(1);
     return;
   }
-  const container = new Container(config);
+  let container: Container;
+  try {
+    container = await Container.create(config);
+  } catch (error) {
+    if (error instanceof DatabaseConnectionError) {
+      // The message names the dialect and host only; the connection string never reaches the logs.
+      logger.fatal({ dialect: error.dialect, host: error.host }, error.message);
+      exitAfterFlush(1);
+      return;
+    }
+    throw error;
+  }
   const { server } = container;
   logger = container.logger;
 
@@ -53,14 +65,14 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'shutting down');
     server
       .close()
-      .then(() => {
-        container.dispose();
+      .then(async () => {
+        await container.dispose();
         logger.info('shutdown complete');
         process.exit(0);
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
         logger.error({ err: error }, 'shutdown failed');
-        container.dispose();
+        await container.dispose().catch(() => undefined);
         process.exit(1);
       });
   };

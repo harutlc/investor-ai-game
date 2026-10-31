@@ -10,10 +10,9 @@ import {
   type PlayerOption,
   type StartupPitch,
 } from '@investor/shared';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import type { DrizzleDb } from '../db/Database.js';
-import { gameSessions } from '../db/schema.js';
+import type { Database, Tables } from '../db/Database.js';
 import { InvestorStateSchema, type InvestorState } from '../game/InvestorState.js';
 import type { Clock } from '../services/PlayerService.js';
 
@@ -40,7 +39,7 @@ export type GameSessionUpdate = Partial<
 
 const PlayerOptionsSchema = z.array(PlayerOptionSchema);
 
-type Row = typeof gameSessions.$inferSelect;
+type Row = Tables['gameSessions']['$inferSelect'];
 
 /**
  * Data access for game sessions. Every read is scoped to the owning player, so a session can never be
@@ -48,72 +47,79 @@ type Row = typeof gameSessions.$inferSelect;
  */
 export class GameSessionRepository {
   constructor(
-    private readonly db: DrizzleDb,
+    private readonly database: Database,
     private readonly clock: Clock = () => new Date(),
   ) {}
 
-  create(session: GameSession): GameSession {
-    this.db
-      .insert(gameSessions)
-      .values({
-        ...session,
-        pitch: StartupPitchSchema.parse(session.pitch),
-        currentInvestorOffer: session.currentInvestorOffer && OfferSchema.parse(session.currentInvestorOffer),
-        investorState: InvestorStateSchema.parse(session.investorState),
-        playerOptions: PlayerOptionsSchema.parse(session.playerOptions),
-      })
-      .run();
+  async create(session: GameSession): Promise<GameSession> {
+    const { gameSessions } = this.database.tables;
+    const values = {
+      ...session,
+      pitch: StartupPitchSchema.parse(session.pitch),
+      currentInvestorOffer: session.currentInvestorOffer && OfferSchema.parse(session.currentInvestorOffer),
+      investorState: InvestorStateSchema.parse(session.investorState),
+      playerOptions: PlayerOptionsSchema.parse(session.playerOptions),
+    };
+    await this.database.query((db) => db.insert(gameSessions).values(values));
     return structuredClone(session);
   }
 
-  findForPlayer(id: string, playerId: string): GameSession | undefined {
-    const row = this.db
-      .select()
-      .from(gameSessions)
-      .where(and(eq(gameSessions.id, id), eq(gameSessions.playerId, playerId)))
-      .get();
+  async findForPlayer(id: string, playerId: string): Promise<GameSession | undefined> {
+    const { gameSessions } = this.database.tables;
+    const [row] = await this.database.query((db) =>
+      db
+        .select()
+        .from(gameSessions)
+        .where(and(eq(gameSessions.id, id), eq(gameSessions.playerId, playerId)))
+        .limit(1),
+    );
     return row ? GameSessionRepository.toSession(row) : undefined;
   }
 
   /** The player's sessions, newest first. */
-  listForPlayer(playerId: string): GameSession[] {
-    return this.db
-      .select()
-      .from(gameSessions)
-      .where(eq(gameSessions.playerId, playerId))
-      .orderBy(desc(gameSessions.createdAt), desc(sql`rowid`))
-      .all()
-      .map((row) => GameSessionRepository.toSession(row));
+  async listForPlayer(playerId: string): Promise<GameSession[]> {
+    const { gameSessions } = this.database.tables;
+    const rows = await this.database.query((db) =>
+      db
+        .select()
+        .from(gameSessions)
+        .where(eq(gameSessions.playerId, playerId))
+        .orderBy(desc(gameSessions.createdAt), desc(this.database.insertionOrder(gameSessions))),
+    );
+    return rows.map((row) => GameSessionRepository.toSession(row));
   }
 
   /**
    * Applies `patch` and always refreshes `updatedAt`. With `expectedTurn`, only a session still on that turn
    * is updated, so a concurrent writer cannot be overwritten. Returns whether a row changed.
    */
-  update(id: string, patch: GameSessionUpdate, options: { expectedTurn?: number } = {}): boolean {
+  async update(
+    id: string,
+    patch: GameSessionUpdate,
+    options: { expectedTurn?: number } = {},
+  ): Promise<boolean> {
+    const { gameSessions } = this.database.tables;
     const match =
       options.expectedTurn === undefined
         ? eq(gameSessions.id, id)
         : and(eq(gameSessions.id, id), eq(gameSessions.turn, options.expectedTurn));
-    const result = this.db
-      .update(gameSessions)
-      .set({
-        ...patch,
-        ...(patch.currentInvestorOffer && {
-          currentInvestorOffer: OfferSchema.parse(patch.currentInvestorOffer),
-        }),
-        ...(patch.investorState && { investorState: InvestorStateSchema.parse(patch.investorState) }),
-        ...(patch.playerOptions && { playerOptions: PlayerOptionsSchema.parse(patch.playerOptions) }),
-        updatedAt: this.clock(),
-      })
-      .where(match)
-      .run();
-    return result.changes > 0;
+    const values = {
+      ...patch,
+      ...(patch.currentInvestorOffer && {
+        currentInvestorOffer: OfferSchema.parse(patch.currentInvestorOffer),
+      }),
+      ...(patch.investorState && { investorState: InvestorStateSchema.parse(patch.investorState) }),
+      ...(patch.playerOptions && { playerOptions: PlayerOptionsSchema.parse(patch.playerOptions) }),
+      updatedAt: this.clock(),
+    };
+    const result = await this.database.query((db) => db.update(gameSessions).set(values).where(match));
+    return this.database.affectedRows(result) > 0;
   }
 
   /** Deletes the session; its messages, offers and decision logs go with it (FK cascade). */
-  delete(id: string): void {
-    this.db.delete(gameSessions).where(eq(gameSessions.id, id)).run();
+  async delete(id: string): Promise<void> {
+    const { gameSessions } = this.database.tables;
+    await this.database.query((db) => db.delete(gameSessions).where(eq(gameSessions.id, id)));
   }
 
   private static toSession(row: Row): GameSession {

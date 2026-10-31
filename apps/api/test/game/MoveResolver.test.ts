@@ -4,7 +4,7 @@ import { InvestorBrain } from '../../src/brain/InvestorBrain.js';
 import { mvpQuestionSets } from '../../src/brain/mvpQuestionSets.js';
 import { NegotiationStateBuilder } from '../../src/brain/NegotiationStateBuilder.js';
 import { QuestionSetRegistry } from '../../src/brain/QuestionSetRegistry.js';
-import { Database } from '../../src/db/Database.js';
+import type { Database } from '../../src/db/Database.js';
 import { InvalidMoveError } from '../../src/errors/InvalidMoveError.js';
 import { InvestorStateUpdater } from '../../src/game/InvestorStateUpdater.js';
 import { MoveResolver } from '../../src/game/MoveResolver.js';
@@ -19,6 +19,7 @@ import { seedSession } from '../support/gameFixtures.js';
 import { settings } from '../support/policyFixtures.js';
 import { captureLogger } from '../support/silentLogger.js';
 import { testConfig } from '../support/testConfig.js';
+import { openTestDatabase } from '../support/testDatabase.js';
 
 const OPTIONS: PlayerOption[] = [
   {
@@ -38,10 +39,10 @@ let logs: DecisionLogRepository;
 let session: GameSession;
 let resolver: MoveResolver;
 
-beforeEach(() => {
-  database = new Database(':memory:');
+beforeEach(async () => {
+  database = await openTestDatabase();
   provider = new FakeDecisionProvider();
-  logs = new DecisionLogRepository(database.db);
+  logs = new DecisionLogRepository(database);
   const brain = new InvestorBrain(
     new QuestionSetRegistry(mvpQuestionSets(), testConfig().game.features),
     new DecisionLogger(provider, logs, captureLogger().logger),
@@ -52,7 +53,7 @@ beforeEach(() => {
     new NegotiationStateBuilder(15),
     new NegotiationPolicy(settings, new InvestorStateUpdater(settings)),
   );
-  session = seedSession(database, { playerOptions: OPTIONS });
+  session = await seedSession(database, { playerOptions: OPTIONS });
 });
 afterEach(() => database.close());
 
@@ -136,6 +137,6 @@ describe('MoveResolver: free text', () => {
     expect(move.dismissal?.action).toEqual({ kind: 'dismiss', offer: { investment: 500_000, equity: 30 } });
     expect(move.dismissal?.investorState.patience).toBe(session.investorState.patience - 1);
     expect(move.offer).toBeNull();
-    expect(logs.listForSession(session.id).every((entry) => entry.stage === 'A')).toBe(true);
+    expect((await logs.listForSession(session.id)).every((entry) => entry.stage === 'A')).toBe(true);
   });
 });

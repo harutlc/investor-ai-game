@@ -77,6 +77,16 @@ describe('LoggerFactory', () => {
     expect(lines[0]).not.toMatch(/hunter2|t-1|k-1|k-2/);
   });
 
+  it('redacts the database URL in a logged config', () => {
+    const { logger, lines, entries } = capture();
+    logger.info(
+      { secrets: { databaseUrl: 'postgres://game:s3cret@db/game' }, dialect: 'postgres' },
+      'config',
+    );
+    expect(entries()[0]!.secrets).toEqual({ databaseUrl: '[Redacted]' });
+    expect(lines[0]).not.toContain('s3cret');
+  });
+
   it('redacts secret fields one level down and keeps the rest of the object', () => {
     const { logger, entries } = capture();
     logger.info({ provider: { apiKey: 'sk-ant-secret', name: 'anthropic' } }, 'configured');

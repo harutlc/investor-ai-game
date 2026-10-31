@@ -119,6 +119,89 @@ describe('ConfigLoader', () => {
     );
   });
 
+  describe('database', () => {
+    const PG_URL = 'postgres://game:s3cret@db.example:5432/game';
+
+    it('defaults to the sqlite dialect', () => {
+      const config = load();
+      expect(config.database.dialect).toBe('sqlite');
+      expect(config.database.poolMax).toBe(10);
+    });
+
+    it('rejects a connection string in the committed file', () => {
+      writeConfig((config) => {
+        config.database!.url = PG_URL;
+      });
+      const error = loadError({ COOKIE_SECRET, CSRF_SECRET });
+      expect(error.message).toMatch(/database.*url/);
+      expect(error.message).not.toContain('s3cret');
+    });
+
+    it('lets DATABASE_DIALECT select the dialect', () => {
+      const config = load({ DATABASE_DIALECT: 'postgres', DATABASE_URL: PG_URL });
+      expect(config.database.dialect).toBe('postgres');
+      expect(config.secrets.databaseUrl).toBe(PG_URL);
+    });
+
+    it('accepts postgresql:// and mysql:// URLs for their dialects', () => {
+      expect(
+        load({ DATABASE_DIALECT: 'postgres', DATABASE_URL: 'postgresql://u:p@h/db' }).database.dialect,
+      ).toBe('postgres');
+      expect(load({ DATABASE_DIALECT: 'mysql', DATABASE_URL: 'mysql://u:p@h/db' }).database.dialect).toBe(
+        'mysql',
+      );
+    });
+
+    it('names an invalid DATABASE_DIALECT', () => {
+      expect(loadError({ COOKIE_SECRET, CSRF_SECRET, DATABASE_DIALECT: 'oracle' }).message).toContain(
+        'database.dialect (from DATABASE_DIALECT)',
+      );
+    });
+
+    it('requires DATABASE_URL for a server dialect', () => {
+      expect(loadError({ COOKIE_SECRET, CSRF_SECRET, DATABASE_DIALECT: 'mysql' }).issues).toContain(
+        'DATABASE_URL is required when database.dialect is "mysql"',
+      );
+    });
+
+    it('rejects a URL whose scheme does not match, without printing it', () => {
+      const error = loadError({
+        COOKIE_SECRET,
+        CSRF_SECRET,
+        DATABASE_DIALECT: 'postgres',
+        DATABASE_URL: 'mysql://game:s3cret@db/game',
+      });
+      expect(error.message).toContain('DATABASE_URL must be a PostgreSQL URL');
+      expect(error.message).not.toContain('s3cret');
+    });
+
+    it('rejects a URL that does not parse, without printing it', () => {
+      const error = loadError({
+        COOKIE_SECRET,
+        CSRF_SECRET,
+        DATABASE_DIALECT: 'mysql',
+        DATABASE_URL: 's3cret',
+      });
+      expect(error.message).toContain('DATABASE_URL must be a MySQL URL');
+      expect(error.message).not.toContain('s3cret');
+    });
+
+    it('ignores DATABASE_URL for sqlite', () => {
+      const config = load({ DATABASE_URL: 'not even a url' });
+      expect(config.database.dialect).toBe('sqlite');
+      expect(config.database.file).toBe(path.join(rootDir, 'data/game.sqlite'));
+    });
+
+    it('requires a database file for sqlite', () => {
+      writeConfig((config) => {
+        delete config.database!.file;
+      });
+      expect(loadError({ COOKIE_SECRET, CSRF_SECRET }).issues).toContain(
+        'database.file is required when database.dialect is "sqlite"',
+      );
+    });
+  });
+
   it.each(['*', 'http://localhost:5173/', 'not a url'])('rejects CORS origin %s', (origin) => {
     writeConfig((config) => {
       config.cors!.origins = [origin];

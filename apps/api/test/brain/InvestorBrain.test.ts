@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { InvestorBrain } from '../../src/brain/InvestorBrain.js';
 import { mvpQuestionSets } from '../../src/brain/mvpQuestionSets.js';
 import { QuestionSetRegistry } from '../../src/brain/QuestionSetRegistry.js';
-import { Database } from '../../src/db/Database.js';
+import type { Database } from '../../src/db/Database.js';
 import { ConfidenceGate } from '../../src/llm/decision/ConfidenceGate.js';
 import { DecisionLogger } from '../../src/llm/decision/DecisionLogger.js';
 import type {
@@ -20,6 +20,7 @@ import { brainMove, choice, noul, score } from '../support/brainFixtures.js';
 import { T0, seedSession } from '../support/gameFixtures.js';
 import { captureLogger } from '../support/silentLogger.js';
 import { testConfig } from '../support/testConfig.js';
+import { openTestDatabase } from '../support/testDatabase.js';
 
 /**
  * Wraps the fake provider so a test can hold each call until a hook resolves: to prove that the calls of
@@ -67,10 +68,10 @@ let database: Database;
 let logs: DecisionLogRepository;
 let sessionId: string;
 
-beforeEach(() => {
-  database = new Database(':memory:');
-  logs = new DecisionLogRepository(database.db);
-  sessionId = seedSession(database).id;
+beforeEach(async () => {
+  database = await openTestDatabase();
+  logs = new DecisionLogRepository(database);
+  sessionId = (await seedSession(database)).id;
 });
 afterEach(() => database.close());
 
@@ -99,7 +100,7 @@ describe('InvestorBrain.understand (Stage A)', () => {
         equity: { value: 15, confidence: 0.9, uncertain: false },
       },
     });
-    const entries = logs.listForSession(sessionId);
+    const entries = await logs.listForSession(sessionId);
     expect(entries.map((entry) => [entry.stage, entry.turn])).toEqual([
       ['A', 1],
       ['A', 1],
@@ -113,7 +114,7 @@ describe('InvestorBrain.understand (Stage A)', () => {
     const result = await brain.understand({ sessionId, turn: 1, ...brainMove(message), message });
 
     expect(result.offer).toEqual({ investment: null, equity: null });
-    expect(logs.listForSession(sessionId)).toHaveLength(1);
+    expect(await logs.listForSession(sessionId)).toHaveLength(1);
   });
 });
 
@@ -129,7 +130,7 @@ describe('InvestorBrain.evaluate (Stage B)', () => {
 
     expect(judgment.deal.reaction).toEqual({ value: 'counter', confidence: 0.9, uncertain: false });
     expect(judgment.conduct?.politeness).toEqual({ value: 3, confidence: 0.9, uncertain: false });
-    const entries = logs.listForSession(sessionId);
+    const entries = await logs.listForSession(sessionId);
     expect(entries.map((entry) => [entry.stage, entry.turn])).toEqual([
       ['B', 4],
       ['B', 4],
@@ -150,7 +151,7 @@ describe('InvestorBrain.evaluate (Stage B)', () => {
     });
 
     expect('conduct' in judgment).toBe(false);
-    expect(logs.listForSession(sessionId)).toHaveLength(1);
+    expect(await logs.listForSession(sessionId)).toHaveLength(1);
   });
 
   it('marks a low-confidence reaction as uncertain without changing it', async () => {
@@ -193,7 +194,7 @@ describe('InvestorBrain.evaluate (Stage B)', () => {
       createBrain(provider).evaluate({ sessionId, turn: 5, ...brainMove('Deal?') }),
     ).rejects.toThrow(ProviderUnavailableError);
 
-    const entries = logs.listForSession(sessionId);
+    const entries = await logs.listForSession(sessionId);
     expect(entries).toHaveLength(2);
     expect(entries.map((entry) => entry.errorCode).sort()).toEqual(['PROVIDER_UNAVAILABLE', null]);
   });
@@ -213,7 +214,7 @@ describe('InvestorBrain.evaluate (Stage B)', () => {
 
     await brain.evaluate({ sessionId, turn: 2, ...move });
 
-    const logged = JSON.stringify(logs.listForSession(sessionId));
+    const logged = JSON.stringify(await logs.listForSession(sessionId));
     expect(logged).not.toContain('700000');
     expect(logged).not.toContain('budget');
   });

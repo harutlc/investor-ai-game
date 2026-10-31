@@ -25,6 +25,7 @@ const ENV_NAMES: Record<string, string> = {
   'secrets.anthropicApiKey': 'ANTHROPIC_API_KEY',
   'secrets.typesafeApiKey': 'TYPESAFE_API_KEY',
   'secrets.layaApiKey': 'LAYA_API_KEY',
+  'secrets.databaseUrl': 'DATABASE_URL',
 };
 
 interface EnvOverride {
@@ -59,6 +60,7 @@ const ENV_OVERRIDES: readonly EnvOverride[] = [
   { path: 'server.port', env: 'PORT' },
   { path: 'server.trustProxy', env: 'TRUST_PROXY', parse: trustProxy },
   { path: 'cors.origins', env: 'CORS_ORIGINS', parse: commaList },
+  { path: 'database.dialect', env: 'DATABASE_DIALECT' },
   { path: 'database.file', env: 'DATABASE_FILE' },
   { path: 'logging.level', env: 'LOG_LEVEL' },
   { path: 'logging.llmContent', env: 'LOG_LLM_CONTENT', parse: booleanFlag },
@@ -105,12 +107,13 @@ export class ConfigLoader {
         anthropicApiKey: env.ANTHROPIC_API_KEY,
         typesafeApiKey: env.TYPESAFE_API_KEY,
         layaApiKey: env.LAYA_API_KEY,
+        databaseUrl: env.DATABASE_URL,
       },
     });
     if (!result.success) throw new ConfigError(this.describeIssues(result.error, overridden));
 
     const config = result.data;
-    if (config.database.file !== IN_MEMORY_DB) {
+    if (config.database.file !== undefined && config.database.file !== IN_MEMORY_DB) {
       config.database.file = path.resolve(this.rootDir, config.database.file);
     }
     return deepFreeze({ ...config, isProduction: config.nodeEnv === 'production', rootDir: this.rootDir });

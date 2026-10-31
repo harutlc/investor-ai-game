@@ -15,7 +15,7 @@ import { choice, noul, score } from '../support/brainFixtures.js';
 import { createTestApp } from '../support/createTestApp.js';
 import { UnavailableThinkingProvider } from '../support/thinkingFixtures.js';
 
-type App = ReturnType<typeof createTestApp>['app'];
+type App = Awaited<ReturnType<typeof createTestApp>>['app'];
 
 const PITCH = {
   name: 'GreenCharge',
@@ -35,9 +35,9 @@ async function browser(app: App) {
   };
 }
 
-function setup() {
+async function setup() {
   const decisions = new FakeDecisionProvider();
-  const { app } = createTestApp({
+  const { app } = await createTestApp({
     decisionProvider: decisions,
     thinkingProvider: new UnavailableThinkingProvider(),
   });
@@ -68,7 +68,7 @@ function expectNoStore(res: Response) {
 
 describe('POST /api/games', () => {
   it('starts a game: 201 with the public view', async () => {
-    const player = await browser(setup().app);
+    const player = await browser((await setup()).app);
     const res = await player.post('/api/games', { personaId: 'greedy-shark', pitch: PITCH });
 
     expect(res.status).toBe(201);
@@ -80,7 +80,7 @@ describe('POST /api/games', () => {
   });
 
   it('rejects an invalid pitch and an unknown persona with 400', async () => {
-    const player = await browser(setup().app);
+    const player = await browser((await setup()).app);
 
     const badPitch = await player.post('/api/games', {
       personaId: 'greedy-shark',
@@ -97,7 +97,7 @@ describe('POST /api/games', () => {
   });
 
   it('requires a CSRF token', async () => {
-    const { app } = setup();
+    const { app } = await setup();
     const res = await request(app).post('/api/games').send({ personaId: 'greedy-shark', pitch: PITCH });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('CSRF_INVALID');
@@ -106,7 +106,7 @@ describe('POST /api/games', () => {
 
 describe('GET /api/games', () => {
   it("lists only the player's games, newest first", async () => {
-    const { app } = setup();
+    const { app } = await setup();
     const alice = await browser(app);
     const bob = await browser(app);
     const first = await startGame(alice);
@@ -123,7 +123,7 @@ describe('GET /api/games', () => {
 
 describe('GET /api/games/:id', () => {
   it("returns the owner's game and 404 for anyone else", async () => {
-    const { app } = setup();
+    const { app } = await setup();
     const alice = await browser(app);
     const bob = await browser(app);
     const game = await startGame(alice);
@@ -141,7 +141,7 @@ describe('GET /api/games/:id', () => {
   });
 
   it('rejects a malformed id with 400', async () => {
-    const player = await browser(setup().app);
+    const player = await browser((await setup()).app);
     const res = await player.get('/api/games/not-a-uuid');
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.body.error.details)).toContain('params.id');
@@ -150,7 +150,7 @@ describe('GET /api/games/:id', () => {
 
 describe('POST /api/games/:id/turns', () => {
   it('plays a counter-offer turn', async () => {
-    const { app, decisions } = setup();
+    const { app, decisions } = await setup();
     const player = await browser(app);
     const game = await startGame(player);
     decisions.enqueue(stageB());
@@ -167,7 +167,7 @@ describe('POST /api/games/:id/turns', () => {
   });
 
   it('rejects two inputs with 400 and leaves the game unchanged', async () => {
-    const player = await browser(setup().app);
+    const player = await browser((await setup()).app);
     const game = await startGame(player);
 
     const res = await player.post(`/api/games/${game.id}/turns`, {
@@ -180,7 +180,7 @@ describe('POST /api/games/:id/turns', () => {
   });
 
   it('rejects an unknown option with 422', async () => {
-    const player = await browser(setup().app);
+    const player = await browser((await setup()).app);
     const game = await startGame(player);
     const res = await player.post(`/api/games/${game.id}/turns`, { optionId: 'opt-9-9' });
     expect(res.status).toBe(422);
@@ -188,7 +188,7 @@ describe('POST /api/games/:id/turns', () => {
   });
 
   it('rejects moves after the game ended with 409', async () => {
-    const player = await browser(setup().app);
+    const player = await browser((await setup()).app);
     const game = await startGame(player);
     const decline = game.options.find((option) => option.kind === 'decline')!;
     expect((await player.post(`/api/games/${game.id}/turns`, { optionId: decline.id })).status).toBe(200);
@@ -201,7 +201,7 @@ describe('POST /api/games/:id/turns', () => {
   });
 
   it('maps a decision outage to 503', async () => {
-    const { app, decisions } = setup();
+    const { app, decisions } = await setup();
     const player = await browser(app);
     const game = await startGame(player);
     decisions.enqueue(new ProviderUnavailableError());
@@ -217,7 +217,7 @@ describe('POST /api/games/:id/turns', () => {
 
 describe('GET /api/games/:id/insights', () => {
   it("lists the turn's Stage B decisions", async () => {
-    const { app, decisions } = setup();
+    const { app, decisions } = await setup();
     const player = await browser(app);
     const game = await startGame(player);
     decisions.enqueue(stageB());
@@ -248,7 +248,7 @@ describe('hidden numbers over HTTP', () => {
   const BUDGET = ['600000', '€600k', '€600,000'];
 
   it('never appear in any response of a full game', async () => {
-    const { app, decisions } = setup();
+    const { app, decisions } = await setup();
     const player = await browser(app);
     const responses: Response[] = [];
     const record = async (pending: Promise<Response>) => {

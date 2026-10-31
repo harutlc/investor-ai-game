@@ -1,6 +1,5 @@
 import { count, eq } from 'drizzle-orm';
-import type { DrizzleDb } from '../db/Database.js';
-import { players } from '../db/schema.js';
+import type { Database } from '../db/Database.js';
 
 export interface Player {
   id: string;
@@ -10,23 +9,31 @@ export interface Player {
 
 /** Data access for anonymous players. No business rules here. */
 export class PlayerRepository {
-  constructor(private readonly db: DrizzleDb) {}
+  constructor(private readonly database: Database) {}
 
-  findById(id: string): Player | undefined {
-    const row = this.db.select().from(players).where(eq(players.id, id)).get();
+  async findById(id: string): Promise<Player | undefined> {
+    const { players } = this.database.tables;
+    const [row] = await this.database.query((db) =>
+      db.select().from(players).where(eq(players.id, id)).limit(1),
+    );
     return row ? { id: row.id, createdAt: row.createdAt, lastSeenAt: row.lastSeenAt } : undefined;
   }
 
-  create(player: Player): Player {
-    this.db.insert(players).values(player).run();
+  async create(player: Player): Promise<Player> {
+    const { players } = this.database.tables;
+    await this.database.query((db) => db.insert(players).values(player));
     return { ...player };
   }
 
-  touch(id: string, at: Date): void {
-    this.db.update(players).set({ lastSeenAt: at }).where(eq(players.id, id)).run();
+  async touch(id: string, at: Date): Promise<void> {
+    const { players } = this.database.tables;
+    await this.database.query((db) => db.update(players).set({ lastSeenAt: at }).where(eq(players.id, id)));
   }
 
-  count(): number {
-    return this.db.select({ value: count() }).from(players).get()?.value ?? 0;
+  async count(): Promise<number> {
+    const { players } = this.database.tables;
+    const [row] = await this.database.query((db) => db.select({ value: count() }).from(players));
+    // PostgreSQL returns count() as a string-typed bigint.
+    return Number(row?.value ?? 0);
   }
 }

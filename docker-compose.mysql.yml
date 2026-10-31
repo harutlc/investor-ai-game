@@ -1,0 +1,36 @@
+# Runs the stack against MySQL instead of SQLite:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mysql.yml up --build
+#
+# The database lives on its own named volume and is reachable only on the Compose network. Set
+# DOCKER_DB_PASSWORD in .env to change the password (URL-safe characters only, as it goes into
+# DATABASE_URL); the default is for local use only. The root password is random and never used.
+
+services:
+  api:
+    environment:
+      DATABASE_DIALECT: mysql
+      DATABASE_URL: mysql://game:${DOCKER_DB_PASSWORD:-game-local-only}@mysql:3306/game
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: game
+      MYSQL_USER: game
+      MYSQL_PASSWORD: ${DOCKER_DB_PASSWORD:-game-local-only}
+      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # During first-time initialization the server runs without TCP, so this passes only once it is ready.
+      test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 -ugame -p"$$MYSQL_PASSWORD" --silent']
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 20
+
+volumes:
+  mysql-data:

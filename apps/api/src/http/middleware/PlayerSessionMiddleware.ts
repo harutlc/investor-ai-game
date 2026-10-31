@@ -28,10 +28,11 @@ export class PlayerSessionMiddleware {
     };
   }
 
-  readonly handle = (req: Request, res: Response, next: NextFunction): void => {
+  /** Async: Express 5 passes a rejection (e.g. the database is down) to the error handler. */
+  readonly handle = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     // cookie-parser puts verified values in signedCookies and `false` for a bad signature.
     const signed: unknown = (req.signedCookies as Record<string, unknown>)[this.cookieName];
-    const { player, issueCookie } = this.players.resolveOrCreate(
+    const { player, issueCookie } = await this.players.resolveOrCreate(
       typeof signed === 'string' ? signed : undefined,
     );
     req.player = player;

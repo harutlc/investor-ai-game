@@ -5,9 +5,9 @@ import { PlayerRepository } from '../../src/repositories/PlayerRepository.js';
 
 export const T0 = new Date('2026-10-03T10:00:00.000Z');
 
-export function seedPlayer(database: Database): string {
+export async function seedPlayer(database: Database): Promise<string> {
   const id = randomUUID();
-  new PlayerRepository(database.db).create({ id, createdAt: T0, lastSeenAt: T0 });
+  await new PlayerRepository(database).create({ id, createdAt: T0, lastSeenAt: T0 });
   return id;
 }
 
@@ -50,6 +50,9 @@ export function sessionFixture(playerId: string, overrides: Partial<GameSession>
 }
 
 /** Seeds a player and one session; returns the session. */
-export function seedSession(database: Database, overrides: Partial<GameSession> = {}): GameSession {
-  return new GameSessionRepository(database.db).create(sessionFixture(seedPlayer(database), overrides));
+export async function seedSession(
+  database: Database,
+  overrides: Partial<GameSession> = {},
+): Promise<GameSession> {
+  return new GameSessionRepository(database).create(sessionFixture(await seedPlayer(database), overrides));
 }

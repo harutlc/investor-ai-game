@@ -9,10 +9,10 @@ import { miniApp } from './miniApp.js';
 import { testConfig } from './testConfig.js';
 
 /** Mini app with cookie parsing, the player session and CSRF protection around a few test routes. */
-export function sessionApp(options: { isProduction?: boolean } = {}) {
+export async function sessionApp(options: { isProduction?: boolean } = {}) {
   const config = testConfig({ nodeEnv: options.isProduction ? 'production' : 'test' });
-  const database = new Database(':memory:');
-  const players = new PlayerRepository(database.db);
+  const database = await Database.open({ file: ':memory:' });
+  const players = new PlayerRepository(database);
   const session = new PlayerSessionMiddleware(config, new PlayerService(players));
   const csrf = new CsrfProtection(config);
 
