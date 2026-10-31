@@ -1,0 +1,216 @@
+#cloud-config
+# Rendered by compute.tf (templatefile). Runs once per server: hardens SSH, installs Docker + Compose, blocks
+# containers from the metadata endpoint, mounts the data volume at /srv/investor and installs the daily S3
+# backup timer. Deploys (scripts/hetzner-deploy.sh) do everything else, including writing the backup key.
+
+# --- Operator access: keys only, as `${ssh_user}` with sudo; no root, no passwords ---
+users:
+  - name: ${ssh_user}
+    # Not 1000: the api container runs as uid 1000 and owns /srv/investor/data.
+    uid: 2000
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+%{ for key in ssh_public_keys ~}
+      - ${jsonencode(trimspace(key))}
+%{ endfor ~}
+disable_root: true
+ssh_pwauth: false
+
+# The host key Terraform generated (its public half is in the known_hosts output). The image's keys are deleted;
+# cloud-init generates only missing types, and ed25519 is supplied, so no other host key exists.
+ssh_deletekeys: true
+ssh_genkeytypes: [ed25519]
+ssh_keys:
+  ed25519_private: |
+    ${indent(4, trimspace(host_key_private))}
+  ed25519_public: ${host_key_public}
+
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - sqlite3
+  - unattended-upgrades
+
+write_files:
+  # Loaded before 50-cloud-init.conf, and the first value sshd reads wins.
+  - path: /etc/ssh/sshd_config.d/10-investor.conf
+    permissions: '0644'
+    content: |
+      HostKey /etc/ssh/ssh_host_ed25519_key
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      AuthenticationMethods publickey
+      AllowUsers ${ssh_user}
+
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "5" }
+      }
+
+  # User data (with the SSH host key) is served at 169.254.169.254; containers must not reach it.
+  - path: /etc/systemd/system/investor-metadata-block.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Block containers from the Hetzner metadata endpoint
+      After=docker.service
+      Requires=docker.service
+      PartOf=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -d 169.254.169.254 -j DROP 2>/dev/null || iptables -I DOCKER-USER -d 169.254.169.254 -j DROP'
+
+      [Install]
+      WantedBy=docker.service
+
+  # Daily off-site backup. /etc/investor/backup.env (BACKUP_AWS_ACCESS_KEY_ID, BACKUP_AWS_SECRET_ACCESS_KEY,
+  # BACKUP_BUCKET, BACKUP_AWS_REGION) is written by the deploy; until then the unit is skipped.
+  - path: /usr/local/sbin/investor-backup
+    permissions: '0750'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      AWS_CLI_IMAGE=amazon/aws-cli:2.37.10
+      db=/srv/investor/data/game.sqlite
+      dir=/srv/investor/backups
+
+      mountpoint -q /srv/investor || { echo "data volume is not mounted at /srv/investor" >&2; exit 1; }
+      [ -f "$db" ] || { echo "no database at $db yet; nothing to back up"; exit 0; }
+
+      set -a
+      # shellcheck disable=SC1091
+      . /etc/investor/backup.env
+      set +a
+
+      stamp=$(date -u +%Y%m%dT%H%M%SZ)
+      copy="$dir/game-$stamp.sqlite"
+
+      # SQLite's online backup API: consistent with WAL, does not stop the API. Run as the api's uid, so any
+      # -wal/-shm file SQLite creates stays writable by the api container.
+      as_api() { setpriv --reuid=1000 --regid=1000 --clear-groups "$@"; }
+      as_api sqlite3 -cmd '.timeout 30000' "$db" ".backup '$copy'"
+      # A self-contained single file (the API switches it back to WAL when it opens a restored copy).
+      as_api sqlite3 "$copy" 'PRAGMA journal_mode=DELETE;' >/dev/null
+      result=$(as_api sqlite3 "$copy" 'PRAGMA integrity_check')
+      if [ "$result" != "ok" ]; then
+        rm -f "$copy"
+        echo "integrity check of the backup failed: $result" >&2
+        exit 1
+      fi
+      gzip -9 "$copy"
+
+      # The key may only PutObject under daily/: it cannot read, list or delete backups.
+      AWS_ACCESS_KEY_ID=$BACKUP_AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$BACKUP_AWS_SECRET_ACCESS_KEY \
+        AWS_REGION=$BACKUP_AWS_REGION \
+        docker run --rm -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION \
+        -v "$dir:/backups:ro" "$AWS_CLI_IMAGE" \
+        s3 cp "/backups/game-$stamp.sqlite.gz" "s3://$BACKUP_BUCKET/daily/$stamp.sqlite.gz" --only-show-errors
+
+      # Keep the last 3 copies on the volume for a quick local restore (names are timestamps, no odd characters).
+      # shellcheck disable=SC2012
+      ls -1t "$dir"/game-*.sqlite.gz | tail -n +4 | xargs -r rm -f
+      echo "uploaded s3://$BACKUP_BUCKET/daily/$stamp.sqlite.gz"
+
+  - path: /etc/systemd/system/investor-backup.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Back up the game database to S3
+      ConditionPathExists=/etc/investor/backup.env
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+      RequiresMountsFor=/srv/investor
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/investor-backup
+
+  - path: /etc/systemd/system/investor-backup.timer
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Daily game database backup to S3
+
+      [Timer]
+      OnCalendar=*-*-* 03:00:00 UTC
+      RandomizedDelaySec=600
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+  - path: /usr/local/sbin/investor-bootstrap
+    permissions: '0750'
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      # --- SSH: apply the hardening drop-in (fails closed if the config is invalid) ---
+      # Ubuntu 24.04 socket-activates sshd, so its privilege separation directory may not exist yet.
+      install -d -m 0755 /run/sshd
+      sshd -t
+      systemctl reload ssh || systemctl restart ssh
+
+      # --- Docker CE + Compose plugin from Docker's apt repository, key fingerprint checked ---
+      DOCKER_KEY_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc.tmp
+      fpr=$(gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc.tmp | awk -F: '/^fpr/ {print $10; exit}')
+      [ "$fpr" = "$DOCKER_KEY_FPR" ] || { echo "unexpected Docker apt key fingerprint: $fpr" >&2; exit 1; }
+      mv /etc/apt/keyrings/docker.asc.tmp /etc/apt/keyrings/docker.asc
+      chmod 0644 /etc/apt/keyrings/docker.asc
+      # shellcheck disable=SC1091
+      . /etc/os-release
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" \
+        > /etc/apt/sources.list.d/docker.list
+      apt-get update -q
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+        docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+      systemctl enable --now docker
+      systemctl daemon-reload
+      systemctl enable --now investor-metadata-block.service
+
+      # --- Data volume: wait for the attachment (it can happen after the server boots) ---
+      device=/dev/disk/by-id/scsi-0HC_Volume_${data_volume_id}
+      for _ in $(seq 1 120); do
+        [ -e "$device" ] && break
+        sleep 5
+      done
+      [ -e "$device" ] || { echo "data volume ${data_volume_id} never appeared" >&2; exit 1; }
+
+      # Format only a blank volume: an existing one keeps its data.
+      if ! blkid "$device" >/dev/null 2>&1; then
+        mkfs.ext4 -L investor-data "$device"
+      fi
+
+      # Mount by label, so a replacement volume with the same label mounts without editing fstab.
+      mkdir -p /srv/investor
+      if ! grep -q 'LABEL=investor-data' /etc/fstab; then
+        echo 'LABEL=investor-data /srv/investor ext4 defaults,nofail,noatime 0 2' >> /etc/fstab
+      fi
+      systemctl daemon-reload
+      mountpoint -q /srv/investor || mount /srv/investor
+
+      # The api image runs as `node` (uid 1000) and the backup copies as the same uid; Caddy runs as root and
+      # keeps its certificates in caddy/.
+      mkdir -p /srv/investor/data /srv/investor/caddy /srv/investor/backups /opt/investor /etc/investor
+      chown 1000:1000 /srv/investor/data /srv/investor/backups
+      chmod 0700 /srv/investor/backups /opt/investor /etc/investor
+
+      systemctl enable --now investor-backup.timer
+
+runcmd:
+  - [/usr/local/sbin/investor-bootstrap]

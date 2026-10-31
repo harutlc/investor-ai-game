@@ -1,18 +1,19 @@
-# The AWS stack (see README "Deploy to AWS"). scripts/aws-deploy.sh copies this file and docker/Caddyfile to
-# /opt/investor on the instance and runs it there; it is not meant for `docker compose up` on a laptop.
+# The server stacks: AWS (README "Deploy to AWS") and Hetzner (README "Deploy to Hetzner"). scripts/aws-deploy.sh
+# and scripts/hetzner-deploy.sh copy this file and docker/Caddyfile to /opt/investor on the server and run it there;
+# it is not meant for `docker compose up` on a laptop.
 #
 # Differences from docker-compose.yml: prebuilt ECR images instead of local builds, Caddy terminates HTTPS
 # and is the only service with host ports, the database lives on the EBS data volume, and the API is
 # pinned to the production topology (hosted providers, the public origin, two trusted proxy hops).
 #
 # Set by the deploy in /opt/investor/.env: ECR_REGISTRY, IMAGE_TAG, DOMAIN, API_DOMAIN, CSRF_ENABLED and the secrets
-# from SSM. Compose reads .env for interpolation; env_file passes the secrets to the api container.
+# from SSM, plus IMAGE_NAMESPACE on Hetzner (its own ECR repositories; AWS uses the default). Compose reads .env for interpolation; env_file passes the secrets to the api container.
 
 name: investor-game
 
 services:
   api:
-    image: ${ECR_REGISTRY:?}/investor-game/api:${IMAGE_TAG:?}
+    image: ${ECR_REGISTRY:?}/${IMAGE_NAMESPACE:-investor-game}/api:${IMAGE_TAG:?}
     env_file: .env
     environment:
       NODE_ENV: production
@@ -45,7 +46,7 @@ services:
       retries: 3
 
   web:
-    image: ${ECR_REGISTRY:?}/investor-game/web:${IMAGE_TAG:?}
+    image: ${ECR_REGISTRY:?}/${IMAGE_NAMESPACE:-investor-game}/web:${IMAGE_TAG:?}
     restart: unless-stopped
     depends_on:
       api:
