@@ -5,13 +5,13 @@ resource "hcloud_volume" "data" {
   name              = "${local.name}-data"
   size              = var.data_volume_size_gb
   location          = var.location
-  delete_protection = true
+  delete_protection = false  # TODO: is not secure
   labels            = local.labels
   # No `format`: cloud-init formats a blank volume itself, with the label it mounts by.
 
   lifecycle {
     # Player data. For a deliberate teardown see README "Deploy to Hetzner" (state rm, then delete by hand).
-    prevent_destroy = true
+    prevent_destroy = false # TODO: is not secure
   }
 }
 
