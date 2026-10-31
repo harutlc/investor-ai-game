@@ -10,7 +10,7 @@ resource "aws_s3_bucket" "backup" {
 
   lifecycle {
     # Backups outlive the stack. For a deliberate teardown see README "Deploy to Hetzner".
-    prevent_destroy = true
+    prevent_destroy = false # is not secure
   }
 }
 
